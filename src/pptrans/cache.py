@@ -139,7 +139,8 @@ def prepare_slide_for_translation(
             f"    Page cache miss for hash {page_hash[:8]}. "
             f"Will send {len(slide_run_info)} runs to LLM."
         )
-        page_requires_llm_processing = True
+        if slide_run_info:  # Only set to True if there are actual runs to process
+            page_requires_llm_processing = True
         for run_detail in slide_run_info:
             original_text = run_detail["original_text"]
             text_id = f"pg{page_number_1_indexed}_txt{text_id_counter}"
@@ -299,16 +300,10 @@ def commit_pending_cache_updates(
                 f"  Updated cache for page_hash: {page_hash[:8]}... with "
                 f"{len(translations_list)} items."
             )
-        elif page_hash in translation_cache_ref and not translations_list:
-            # If it was a miss, and LLM returned nothing, we might want to remove it or
-            # store empty.
-            # For now, if list is empty, we effectively remove it if it was a full miss,
-            # or don't update if it was partial and this list is empty.
-            # The plan is that pending_page_cache_updates[page_hash] should be the
-            # definitive new list.
-            translation_cache_ref[
-                page_hash
-            ] = []  # Store empty list if LLM provided no translations for this page
+        elif not translations_list:  # translations_list is empty
+            # This covers both new hashes with empty lists and existing hashes
+            # that should now have an empty list.
+            translation_cache_ref[page_hash] = []
             click.echo(
                 f"  Storing empty translation list for page_hash: {page_hash[:8]}..."
             )
