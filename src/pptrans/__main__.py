@@ -1,9 +1,9 @@
 """Translate PowerPoint presentations."""
 
+import hashlib
 import json
 import os
 import shutil  # For file copying
-import hashlib
 
 import click
 import llm  # Simon Willison's LLM library
@@ -18,9 +18,9 @@ def load_cache(cache_file_path) -> dict:
     """Loads the translation cache from a JSON file."""
     if os.path.exists(cache_file_path):
         try:
-            with open(cache_file_path, "r", encoding="utf-8") as f:
+            with open(cache_file_path, encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             click.echo(
                 f"Warning: Could not load cache file {cache_file_path}. Error: {e}. Starting with an empty cache.",
                 err=True,
@@ -33,7 +33,7 @@ def save_cache(cache_data, cache_file_path):
     try:
         with open(cache_file_path, "w", encoding="utf-8") as f:
             json.dump(cache_data, f, indent=4, ensure_ascii=False)
-    except IOError as e:
+    except OSError as e:
         click.echo(
             f"Warning: Could not save cache file {cache_file_path}. Error: {e}",
             err=True,
@@ -45,10 +45,9 @@ def generate_page_hash(texts_on_page: list[str]) -> str:
     concatenated_texts = "|".join(texts_on_page)  # Use a delimiter
     return hashlib.sha256(concatenated_texts.encode("utf-8")).hexdigest()
 
+
 def reverse_individual_words(text_string_with_eol):
-    """
-    Reverses each word in a space-separated string, preserving an EOL_MARKER if present.
-    """
+    """Reverses each word in a space-separated string, preserving an EOL_MARKER if present."""
     text_to_reverse = text_string_with_eol
     had_eol = False
     if text_string_with_eol.endswith(EOL_MARKER):
@@ -84,8 +83,7 @@ def reverse_individual_words(text_string_with_eol):
 @click.argument("input_path", type=click.Path(exists=True, dir_okay=False))
 @click.argument("output_path", type=click.Path(dir_okay=False))
 def main(input_path, output_path, mode, pages):
-    """
-    Processes a PowerPoint presentation.
+    """Processes a PowerPoint presentation.
     It first copies the input presentation to the output path.
     Then, for 'translate' and 'reverse-words' modes, text on selected slides
     within this copied presentation is modified in place.
@@ -116,7 +114,7 @@ def main(input_path, output_path, mode, pages):
     if pages:
         try:
             selected_pages_0_indexed = parse_page_range(pages, num_original_slides)
-        except click.BadParameter as e:
+        except click.BadParameter:
             # parse_page_range raises BadParameter, which click handles by exiting.
             # We can re-raise if we want to be explicit or add more context, but click does it.
             # For now, let click handle the exit.
@@ -175,11 +173,13 @@ def main(input_path, output_path, mode, pages):
 
     if mode == "translate":
         click.echo(f"Loading translation cache from: {cache_file_path}")
-        translation_cache = load_cache(cache_file_path) # This will now be page-hash based
+        translation_cache = load_cache(
+            cache_file_path
+        )  # This will now be page-hash based
 
-        global_texts_for_llm_prompt = [] # Stores items for LLM: {id, original_text_for_cache, text_to_send, run_object, page_hash}
-        all_processed_run_details = [] # Stores details for all runs: {run_object, final_translation, from_cache, original_text, llm_id (if applicable)}
-        pending_page_cache_updates = {} # {page_hash: [{"original_text": ..., "translation": ...}]}
+        global_texts_for_llm_prompt = []  # Stores items for LLM: {id, original_text_for_cache, text_to_send, run_object, page_hash}
+        all_processed_run_details = []  # Stores details for all runs: {run_object, final_translation, from_cache, original_text, llm_id (if applicable)}
+        pending_page_cache_updates = {}  # {page_hash: [{"original_text": ..., "translation": ...}]}
 
         if slides_to_process_objects:
             click.echo(
@@ -187,7 +187,7 @@ def main(input_path, output_path, mode, pages):
             )
             for slide_idx, slide_to_extract in enumerate(slides_to_process_objects):
                 current_page_texts_for_hash = []
-                current_page_run_info = [] # List of {"original_text": ..., "run_object": ...}
+                current_page_run_info = []  # List of {"original_text": ..., "run_object": ...}
 
                 # First pass: extract all texts from the current slide for hashing and run info
                 for shape in slide_to_extract.shapes:
@@ -197,7 +197,12 @@ def main(input_path, output_path, mode, pages):
                                 original_text = run.text
                                 if original_text:
                                     current_page_texts_for_hash.append(original_text)
-                                    current_page_run_info.append({"original_text": original_text, "run_object": run})
+                                    current_page_run_info.append(
+                                        {
+                                            "original_text": original_text,
+                                            "run_object": run,
+                                        }
+                                    )
                     if shape.has_table:
                         for row_idx, row in enumerate(shape.table.rows):
                             for col_idx, cell in enumerate(row.cells):
@@ -205,82 +210,115 @@ def main(input_path, output_path, mode, pages):
                                     for run in paragraph.runs:
                                         original_text = run.text
                                         if original_text:
-                                            current_page_texts_for_hash.append(original_text)
-                                            current_page_run_info.append({"original_text": original_text, "run_object": run})
-                
+                                            current_page_texts_for_hash.append(
+                                                original_text
+                                            )
+                                            current_page_run_info.append(
+                                                {
+                                                    "original_text": original_text,
+                                                    "run_object": run,
+                                                }
+                                            )
+
                 if not current_page_texts_for_hash:
                     click.echo(f"  Slide {slide_idx + 1}: No text found.")
                     continue
 
                 page_hash = generate_page_hash(current_page_texts_for_hash)
-                click.echo(f"  Slide {slide_idx + 1}: Hash '{page_hash[:8]}...', {len(current_page_run_info)} text runs.")
+                click.echo(
+                    f"  Slide {slide_idx + 1}: Hash '{page_hash[:8]}...', {len(current_page_run_info)} text runs."
+                )
 
                 if page_hash in translation_cache:
                     click.echo(f"    Page cache hit for hash {page_hash[:8]}...")
                     cached_translations_for_page = translation_cache[page_hash]
-                    
+
                     for run_detail in current_page_run_info:
                         found_in_page_cache = False
                         for cached_item in cached_translations_for_page:
-                            if cached_item["original_text"] == run_detail["original_text"]:
-                                all_processed_run_details.append({
-                                    "run_object": run_detail["run_object"],
-                                    "final_translation": cached_item["translation"],
-                                    "from_cache": True,
-                                    "original_text": run_detail["original_text"]
-                                })
+                            if (
+                                cached_item["original_text"]
+                                == run_detail["original_text"]
+                            ):
+                                all_processed_run_details.append(
+                                    {
+                                        "run_object": run_detail["run_object"],
+                                        "final_translation": cached_item["translation"],
+                                        "from_cache": True,
+                                        "original_text": run_detail["original_text"],
+                                    }
+                                )
                                 found_in_page_cache = True
                                 break
                         if not found_in_page_cache:
-                             # This case implies the page hash matched, but an individual text on that page
-                             # wasn't in the cached list for that page. This might happen if the page structure
-                             # is identical but some minor text was edited, then re-edited back to make the hash match,
-                             # but the cache entry for that page is from a state where that specific text was different.
-                             # For simplicity, we'll treat this as needing LLM translation for this specific run.
-                            click.echo(f"    Partial page cache hit for {page_hash[:8]}. Text '{run_detail['original_text'][:30]}...' not in page's cached list. Sending to LLM.")
+                            # This case implies the page hash matched, but an individual text on that page
+                            # wasn't in the cached list for that page. This might happen if the page structure
+                            # is identical but some minor text was edited, then re-edited back to make the hash match,
+                            # but the cache entry for that page is from a state where that specific text was different.
+                            # For simplicity, we'll treat this as needing LLM translation for this specific run.
+                            click.echo(
+                                f"    Partial page cache hit for {page_hash[:8]}. Text '{run_detail['original_text'][:30]}...' not in page's cached list. Sending to LLM."
+                            )
                             text_id = f"text_{text_id_counter}"
                             text_id_counter += 1
-                            global_texts_for_llm_prompt.append({
-                                "id": text_id,
-                                "original_text_for_cache": run_detail["original_text"],
-                                "text_to_send": run_detail["original_text"] + EOL_MARKER,
-                                "run_object": run_detail["run_object"],
-                                "page_hash": page_hash # Associate with current page
-                            })
-                            all_processed_run_details.append({
-                                "run_object": run_detail["run_object"],
-                                "final_translation": None, # Will be filled by LLM
-                                "from_cache": False,
-                                "original_text": run_detail["original_text"],
-                                "llm_id": text_id
-                            })
+                            global_texts_for_llm_prompt.append(
+                                {
+                                    "id": text_id,
+                                    "original_text_for_cache": run_detail[
+                                        "original_text"
+                                    ],
+                                    "text_to_send": run_detail["original_text"]
+                                    + EOL_MARKER,
+                                    "run_object": run_detail["run_object"],
+                                    "page_hash": page_hash,  # Associate with current page
+                                }
+                            )
+                            all_processed_run_details.append(
+                                {
+                                    "run_object": run_detail["run_object"],
+                                    "final_translation": None,  # Will be filled by LLM
+                                    "from_cache": False,
+                                    "original_text": run_detail["original_text"],
+                                    "llm_id": text_id,
+                                }
+                            )
                             # Ensure this page is marked for potential cache update
                             if page_hash not in pending_page_cache_updates:
                                 pending_page_cache_updates[page_hash] = []
 
-
-                else: # Page cache miss
-                    click.echo(f"    Page cache miss for hash {page_hash[:8]}. Will send {len(current_page_run_info)} runs to LLM.")
-                    pending_page_cache_updates[page_hash] = [] # Prepare to build this page's cache entry
+                else:  # Page cache miss
+                    click.echo(
+                        f"    Page cache miss for hash {page_hash[:8]}. Will send {len(current_page_run_info)} runs to LLM."
+                    )
+                    pending_page_cache_updates[
+                        page_hash
+                    ] = []  # Prepare to build this page's cache entry
                     for run_detail in current_page_run_info:
                         text_id = f"text_{text_id_counter}"
                         text_id_counter += 1
-                        global_texts_for_llm_prompt.append({
-                            "id": text_id,
-                            "original_text_for_cache": run_detail["original_text"],
-                            "text_to_send": run_detail["original_text"] + EOL_MARKER,
-                            "run_object": run_detail["run_object"],
-                            "page_hash": page_hash
-                        })
-                        all_processed_run_details.append({
-                            "run_object": run_detail["run_object"],
-                            "final_translation": None, # Will be filled by LLM
-                            "from_cache": False,
-                            "original_text": run_detail["original_text"],
-                            "llm_id": text_id
-                        })
-        
-        if not all_processed_run_details: # Check if any text runs were collected at all
+                        global_texts_for_llm_prompt.append(
+                            {
+                                "id": text_id,
+                                "original_text_for_cache": run_detail["original_text"],
+                                "text_to_send": run_detail["original_text"]
+                                + EOL_MARKER,
+                                "run_object": run_detail["run_object"],
+                                "page_hash": page_hash,
+                            }
+                        )
+                        all_processed_run_details.append(
+                            {
+                                "run_object": run_detail["run_object"],
+                                "final_translation": None,  # Will be filled by LLM
+                                "from_cache": False,
+                                "original_text": run_detail["original_text"],
+                                "llm_id": text_id,
+                            }
+                        )
+
+        if (
+            not all_processed_run_details
+        ):  # Check if any text runs were collected at all
             click.echo(
                 f"No text found to process on selected slides for mode '{mode}'."
             )
@@ -289,7 +327,9 @@ def main(input_path, output_path, mode, pages):
                 f"Presentation saved without text modification in '{mode}' mode to: {output_path}"
             )
             # Save cache even if empty/unchanged, as it might have been loaded and format changed
-            click.echo(f"Saving cache (potentially empty or format updated) to: {cache_file_path}")
+            click.echo(
+                f"Saving cache (potentially empty or format updated) to: {cache_file_path}"
+            )
             save_cache(translation_cache, cache_file_path)
             return
 
@@ -377,40 +417,56 @@ def main(input_path, output_path, mode, pages):
                         )
 
                         if prompt_item_data:
-                            original_text_for_cache_key = prompt_item_data["original_text_for_cache"]
+                            original_text_for_cache_key = prompt_item_data[
+                                "original_text_for_cache"
+                            ]
                             current_page_hash = prompt_item_data["page_hash"]
-                            
+
                             final_llm_translation = llm_translation_with_eol
-                            if final_llm_translation.endswith(EOL_MARKER):
-                                final_llm_translation = final_llm_translation[:-len(EOL_MARKER)]
-                            
+                            final_llm_translation = final_llm_translation.removesuffix(
+                                EOL_MARKER
+                            )
+
                             # Add to pending_page_cache_updates for the specific page
                             # Ensure the list for the page_hash exists
                             if current_page_hash not in pending_page_cache_updates:
                                 pending_page_cache_updates[current_page_hash] = []
-                            
+
                             # Avoid duplicate entries if a text appears multiple times on a page and was sent to LLM
                             # (though current logic sends each run instance, so original_text might not be unique in the list for a page)
                             # For now, we assume each original_text within a page that went to LLM is distinct enough or handled by run_object uniqueness.
                             # The cache structure is a list of {"original_text": ..., "translation": ...} for the page.
-                            
+
                             # Update the all_processed_run_details list
                             for detail_item in all_processed_run_details:
                                 if detail_item.get("llm_id") == parsed_text_id:
-                                    detail_item["final_translation"] = final_llm_translation
+                                    detail_item["final_translation"] = (
+                                        final_llm_translation
+                                    )
                                     # We also need to prepare for saving this to the page's cache entry
                                     # Check if this original_text is already slated for this page_hash update
                                     found_in_pending = False
-                                    for pending_item in pending_page_cache_updates[current_page_hash]:
-                                        if pending_item["original_text"] == original_text_for_cache_key:
-                                            pending_item["translation"] = final_llm_translation # Update if somehow already there
+                                    for pending_item in pending_page_cache_updates[
+                                        current_page_hash
+                                    ]:
+                                        if (
+                                            pending_item["original_text"]
+                                            == original_text_for_cache_key
+                                        ):
+                                            pending_item["translation"] = (
+                                                final_llm_translation  # Update if somehow already there
+                                            )
                                             found_in_pending = True
                                             break
                                     if not found_in_pending:
-                                         pending_page_cache_updates[current_page_hash].append({
-                                            "original_text": original_text_for_cache_key,
-                                            "translation": final_llm_translation
-                                        })
+                                        pending_page_cache_updates[
+                                            current_page_hash
+                                        ].append(
+                                            {
+                                                "original_text": original_text_for_cache_key,
+                                                "translation": final_llm_translation,
+                                            }
+                                        )
                                     break
                         else:
                             click.echo(
@@ -432,13 +488,19 @@ def main(input_path, output_path, mode, pages):
             "Replacing text with translations on slides in the copied presentation..."
         )
         for item in all_processed_run_details:
-            if item["final_translation"] is not None: # Check for None, as empty string is a valid translation
+            if (
+                item["final_translation"] is not None
+            ):  # Check for None, as empty string is a valid translation
                 item["run_object"].text = item["final_translation"]
             elif not item["from_cache"]:
-                 click.echo(f"Warning: No translation found for run with original text '{item['original_text'][:30]}...' (LLM ID: {item.get('llm_id', 'N/A')}). Leaving original.", err=True)
+                click.echo(
+                    f"Warning: No translation found for run with original text '{item['original_text'][:30]}...' (LLM ID: {item.get('llm_id', 'N/A')}). Leaving original.",
+                    err=True,
+                )
 
-
-        click.echo(f"Updating and saving page-based translation cache to: {cache_file_path}")
+        click.echo(
+            f"Updating and saving page-based translation cache to: {cache_file_path}"
+        )
         # Merge pending updates into the main translation_cache
         for page_hash, translations_list in pending_page_cache_updates.items():
             # If a page was partially a cache hit but had some new items for LLM,
@@ -450,19 +512,21 @@ def main(input_path, output_path, mode, pages):
             #   - Runs from cache are already applied.
             #   - Runs to LLM have their translations in pending_page_cache_updates[page_hash].
             #   - We need to ensure the final cache entry for this page_hash contains *all* original_text/translation pairs.
-            
+
             # Simplest approach for now: if a page_hash is in pending_page_cache_updates,
             # it means it had at least one LLM translation. We'll build its cache entry
             # from all_processed_run_details that belong to that page_hash.
-            
+
             # Rebuild the cache entry for any page that had LLM involvement or was a full miss.
-            if page_hash in pending_page_cache_updates: # Indicates LLM was involved for this page
+            if (
+                page_hash in pending_page_cache_updates
+            ):  # Indicates LLM was involved for this page
                 rebuilt_page_cache_entry = []
                 # Find all runs associated with this page_hash from all_processed_run_details
                 # This is inefficient if done here. Better to build pending_page_cache_updates correctly during LLM response processing.
                 # For now, let's assume pending_page_cache_updates[page_hash] has the full list for pages that had misses/LLM calls.
                 # The current logic for populating pending_page_cache_updates might be okay if it collects all items for a page_hash that had any LLM calls.
-                
+
                 # Let's refine: pending_page_cache_updates should store the *complete* list of translations for a page if it's being updated.
                 # The current LLM response loop populates it with LLM results.
                 # If a page was a cache hit, it's not in pending_page_cache_updates.
@@ -486,7 +550,7 @@ def main(input_path, output_path, mode, pages):
                 # Let's stick to the plan: `pending_page_cache_updates[page_hash]` stores the *full list* for pages that had misses.
                 # The LLM response loop correctly adds `{"original_text": ..., "translation": ...}` to `pending_page_cache_updates[current_page_hash]`.
                 # This list should be complete for pages that had any LLM calls.
-                if translations_list: # Only update if there are actual translations
+                if translations_list:  # Only update if there are actual translations
                     translation_cache[page_hash] = translations_list
                 elif page_hash in translation_cache and not translations_list:
                     # This means a page hash was in pending_updates (so it was a miss or partial)
@@ -499,11 +563,10 @@ def main(input_path, output_path, mode, pages):
                     # the old cache entry might persist if not explicitly overwritten.
                     # This needs to be robust: if a page is processed and had LLM calls, its entry in
                     # translation_cache should reflect the latest state of all its texts.
-                    
+
                     # Corrected logic: if page_hash is in pending_page_cache_updates, it means we intended to update it.
                     # The list `translations_list` should be the definitive new list of original_text/translation pairs for that page.
                     translation_cache[page_hash] = translations_list
-
 
         save_cache(translation_cache, cache_file_path)
 
@@ -568,8 +631,7 @@ def main(input_path, output_path, mode, pages):
         for item in text_elements_for_reverse:
             reversed_text_with_eol = reverse_individual_words(item["text"])
             final_reversed_text = reversed_text_with_eol
-            if final_reversed_text.endswith(EOL_MARKER):
-                final_reversed_text = final_reversed_text[: -len(EOL_MARKER)]
+            final_reversed_text = final_reversed_text.removesuffix(EOL_MARKER)
             item["run_object"].text = final_reversed_text
         click.echo(
             "Text replaced with reversed-word text on slides in the copied presentation."
