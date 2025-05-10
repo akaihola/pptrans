@@ -57,6 +57,7 @@ def prepare_slide_for_translation(
     translation_cache: dict[str, list[dict[str, str]]],
     text_id_counter: int,
     eol_marker: str,
+    page_number_1_indexed: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int, bool]:
     """Prepare slide text runs for translation, checking against the cache.
 
@@ -66,6 +67,7 @@ def prepare_slide_for_translation(
         translation_cache: The current translation cache.
         text_id_counter: Current unique ID counter for LLM texts.
         eol_marker: End-of-line marker string.
+        page_number_1_indexed: 1-indexed page number of the current slide.
 
     Returns:
         A tuple containing:
@@ -111,7 +113,7 @@ def prepare_slide_for_translation(
                     f"      Partial page cache hit. Text '{original_text[:30]}...' "
                     "not in page's cached list. Sending to LLM."
                 )
-                text_id = f"text_{text_id_counter}"
+                text_id = f"pg{page_number_1_indexed}_txt{text_id_counter}"
                 text_id_counter += 1
                 page_requires_llm_processing = True
                 texts_for_llm.append(
@@ -140,7 +142,7 @@ def prepare_slide_for_translation(
         page_requires_llm_processing = True
         for run_detail in slide_run_info:
             original_text = run_detail["original_text"]
-            text_id = f"text_{text_id_counter}"
+            text_id = f"pg{page_number_1_indexed}_txt{text_id_counter}"
             text_id_counter += 1
             texts_for_llm.append(
                 {

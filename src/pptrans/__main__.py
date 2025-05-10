@@ -89,10 +89,12 @@ def main(input_path: str, output_path: str, mode: str, pages: str) -> None:
         selected_pages_0_indexed = set(range(num_original_slides))
 
     slides_to_process_objects = []
+    original_page_indices_for_processing = []
     if num_original_slides > 0:
-        for i, slide_obj in enumerate(prs.slides):
+        for i, slide_obj in enumerate(prs.slides):  # i is original 0-indexed page
             if i in selected_pages_0_indexed:
                 slides_to_process_objects.append(slide_obj)
+                original_page_indices_for_processing.append(i)
 
     if not slides_to_process_objects:
         if pages:
@@ -137,6 +139,10 @@ def main(input_path: str, output_path: str, mode: str, pages: str) -> None:
                 "selected slide(s) for translation..."
             )
             for slide_idx, slide_to_extract in enumerate(slides_to_process_objects):
+                original_page_0_indexed = original_page_indices_for_processing[
+                    slide_idx
+                ]
+                current_page_num_1_indexed = original_page_0_indexed + 1
                 current_page_texts_for_hash: list[str] = []
                 current_page_run_info: list[dict[str, Any]] = []
 
@@ -187,6 +193,7 @@ def main(input_path: str, output_path: str, mode: str, pages: str) -> None:
                     translation_cache,
                     text_id_counter,
                     EOL_MARKER,
+                    current_page_num_1_indexed,
                 )
                 global_texts_for_llm_prompt.extend(texts_for_llm_slide)
                 all_processed_run_details.extend(processed_runs_slide)
@@ -232,11 +239,11 @@ def main(input_path: str, output_path: str, mode: str, pages: str) -> None:
                 "You are an expert Finnish to English translator. "
                 "Translate the following text segments accurately from Finnish to "
                 "English. "
-                "Each segment is prefixed with a unique ID (e.g., text_0, text_1). "
-                "IMPORTANT: A sequence of text items (e.g., text_0, text_1, text_2) "
-                "may represent a single continuous sentence that has been split due "
-                "to formatting. Interpret and translate such sequences as a coherent "
-                "whole sentence to maintain context and flow. "
+                "Each segment is prefixed with a unique ID (e.g., pg1_txt0, pg1_txt1). "
+                "IMPORTANT: A sequence of text items (e.g., pg1_txt0, pg1_txt1, "
+                "pg1_txt2) may represent a single continuous sentence that has been "
+                "split due to formatting. Interpret and translate such sequences as a "
+                "coherent whole sentence to maintain context and flow. "
                 "The text for each ID might end with an EOL marker: '<'. "
                 "Your response MUST consist ONLY of the translated segments, each "
                 "prefixed with its original ID, "
@@ -247,17 +254,17 @@ def main(input_path: str, output_path: str, mode: str, pages: str) -> None:
                 "IT MUST be present at the end of your translated segment, including "
                 "any whitespace before it.\n"
                 "For example, if you receive:\n"
-                "text_0: Tämä on pitkä \n"
-                "text_1:lause, joka on \n"
-                "text_2:jaettu.<\n"
-                "text_3:    Toinen lause.   <\n"
-                "text_4: Yksittäinen.\n"
+                "pg1_txt0: Tämä on pitkä \n"
+                "pg1_txt1:lause, joka on \n"
+                "pg1_txt2:jaettu.<\n"
+                "pg1_txt3:    Toinen lause.   <\n"
+                "pg2_txt0: Yksittäinen.\n"
                 "You MUST return:\n"
-                "text_0: This is a long \n"
-                "text_1:sentence that has been \n"
-                "text_2:split.<\n"
-                "text_3:    Another sentence.   <\n"
-                "text_4: Standalone.\n\n"
+                "pg1_txt0: This is a long \n"
+                "pg1_txt1:sentence that has been \n"
+                "pg1_txt2:split.<\n"
+                "pg1_txt3:    Another sentence.   <\n"
+                "pg2_txt0: Standalone.\n\n"
                 "Do not add any extra explanations, apologies, or "
                 "introductory/concluding remarks. "
                 "Only provide the ID followed by the translated text for each item.\n\n"
@@ -316,7 +323,13 @@ def main(input_path: str, output_path: str, mode: str, pages: str) -> None:
                 f"Extracting text from {len(slides_to_process_objects)} slides in the "
                 f"copied presentation for mode '{mode}'..."
             )
-            for slide_to_extract in slides_to_process_objects:
+            for slide_idx_reverse, slide_to_extract in enumerate(
+                slides_to_process_objects
+            ):
+                original_page_0_indexed = original_page_indices_for_processing[
+                    slide_idx_reverse
+                ]
+                current_page_num_1_indexed = original_page_0_indexed + 1
                 for shape in slide_to_extract.shapes:
                     if shape.has_text_frame:
                         for paragraph in shape.text_frame.paragraphs:
@@ -324,7 +337,10 @@ def main(input_path: str, output_path: str, mode: str, pages: str) -> None:
                                 original_text = run.text
                                 if original_text:
                                     text_with_eol = original_text + EOL_MARKER
-                                    text_id = f"text_{text_id_counter}"
+                                    text_id = (
+                                        f"pg{current_page_num_1_indexed}_"
+                                        f"txt{text_id_counter}"
+                                    )
                                     text_elements_for_reverse.append(
                                         {
                                             "id": text_id,
@@ -341,7 +357,10 @@ def main(input_path: str, output_path: str, mode: str, pages: str) -> None:
                                         original_text = run.text
                                         if original_text:
                                             text_with_eol = original_text + EOL_MARKER
-                                            text_id = f"text_{text_id_counter}"
+                                            text_id = (
+                                                f"pg{current_page_num_1_indexed}_"
+                                                f"txt{text_id_counter}"
+                                            )
                                             text_elements_for_reverse.append(
                                                 {
                                                     "id": text_id,
