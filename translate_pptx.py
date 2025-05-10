@@ -56,19 +56,26 @@ def _duplicate_slide_to_end(pres, source_slide):
     #     if ts.notes_text_frame:
     #          new_notes_slide.notes_text_frame.text = ts.notes_text_frame.text
 
-
     return new_slide
 
 
 def reverse_individual_words(text_string):
     """Reverses each word in a space-separated string."""
-    words = text_string.split(' ')
+    words = text_string.split(" ")
     reversed_words = [word[::-1] for word in words]
-    return ' '.join(reversed_words)
+    return " ".join(reversed_words)
 
 
 @click.command()
-@click.option('--mode', type=click.Choice(['translate', 'duplicate-only', 'reverse-words'], case_sensitive=False), default='translate', show_default=True, help='Operation mode for the script.')
+@click.option(
+    "--mode",
+    type=click.Choice(
+        ["translate", "duplicate-only", "reverse-words"], case_sensitive=False
+    ),
+    default="translate",
+    show_default=True,
+    help="Operation mode for the script.",
+)
 @click.argument("input_path", type=click.Path(exists=True, dir_okay=False))
 @click.argument("output_path", type=click.Path(dir_okay=False))
 def main(input_path, output_path, mode):
@@ -90,7 +97,7 @@ def main(input_path, output_path, mode):
     click.echo("File copy complete.")
 
     click.echo(f"Loading presentation for modification from: {output_path}")
-    prs = Presentation(output_path) # Open the copied file
+    prs = Presentation(output_path)  # Open the copied file
 
     num_original_slides = len(prs.slides)
     if num_original_slides == 0:
@@ -98,28 +105,34 @@ def main(input_path, output_path, mode):
         # prs.save(output_path) # Save the (empty) copy
         return
 
-    slides_for_text_extraction = [] # Will hold the duplicated slides for modification
+    slides_for_text_extraction = []  # Will hold the duplicated slides for modification
 
-    click.echo(f"Duplicating {num_original_slides} original slide(s) to the end of the presentation...")
+    click.echo(
+        f"Duplicating {num_original_slides} original slide(s) to the end of the presentation..."
+    )
     for i in range(num_original_slides):
-        original_slide = prs.slides[i] # This is a slide from the *copied* presentation
-        click.echo(f"  Duplicating original slide {i + 1} ('{original_slide.slide_layout.name}')...")
-        
+        original_slide = prs.slides[i]  # This is a slide from the *copied* presentation
+        click.echo(
+            f"  Duplicating original slide {i + 1} ('{original_slide.slide_layout.name}')..."
+        )
+
         # Duplicate the slide and append it to the end
         duplicated_slide = _duplicate_slide_to_end(prs, original_slide)
-        
+
         if mode == "translate" or mode == "reverse-words":
             slides_for_text_extraction.append(duplicated_slide)
         elif mode == "duplicate-only":
             # For duplicate-only, we still add it to this list,
             # but it won't be processed for text.
             # This keeps the logic consistent for reporting.
-            slides_for_text_extraction.append(duplicated_slide) 
-            
+            slides_for_text_extraction.append(duplicated_slide)
+
         click.echo(f"    Slide {i + 1} duplicated. Total slides now: {len(prs.slides)}")
 
     if mode == "duplicate-only":
-        click.echo("Mode 'duplicate-only': Text processing skipped. All slides (originals and their duplicates) are saved.")
+        click.echo(
+            "Mode 'duplicate-only': Text processing skipped. All slides (originals and their duplicates) are saved."
+        )
         prs.save(output_path)
         click.echo(f"Presentation saved in '{mode}' mode to: {output_path}")
         return
@@ -130,7 +143,9 @@ def main(input_path, output_path, mode):
     text_id_counter = 0
 
     if slides_for_text_extraction:
-        click.echo(f"Extracting text from {len(slides_for_text_extraction)} duplicated slides for mode '{mode}'...")
+        click.echo(
+            f"Extracting text from {len(slides_for_text_extraction)} duplicated slides for mode '{mode}'..."
+        )
         for slide_to_extract in slides_for_text_extraction:
             for shape in slide_to_extract.shapes:
                 if shape.has_text_frame:
@@ -163,14 +178,18 @@ def main(input_path, output_path, mode):
                                             }
                                         )
                                         text_id_counter += 1
-    
+
     if not text_elements:
         click.echo(f"No text found to process on duplicated slides for mode '{mode}'.")
         prs.save(output_path)
-        click.echo(f"Presentation saved without text modification in '{mode}' mode to: {output_path}")
+        click.echo(
+            f"Presentation saved without text modification in '{mode}' mode to: {output_path}"
+        )
         return
 
-    click.echo(f"Found {len(text_elements)} text elements to process for mode '{mode}'.")
+    click.echo(
+        f"Found {len(text_elements)} text elements to process for mode '{mode}'."
+    )
 
     if mode == "translate":
         formatted_text = "\n".join(
@@ -193,7 +212,7 @@ def main(input_path, output_path, mode):
             "Texts to translate:\n"
         )
         click.echo("Sending text to LLM for translation...")
-        model = llm.get_model() # Assumes llm is configured
+        model = llm.get_model()  # Assumes llm is configured
         response = model.prompt(prompt, fragments=[formatted_text])
         translated_text_response = response.text()
         click.echo("Received translation from LLM.")
@@ -213,19 +232,21 @@ def main(input_path, output_path, mode):
                     click.echo(f"Warning: Could not parse translation line: {line}")
             except Exception as e:
                 click.echo(f"Warning: Error parsing translation line '{line}': {e}")
-        
+
         click.echo("Replacing text with translations on duplicated slides...")
         for item in text_elements:
-            modified_text = id_to_modified_text.get(item["id"], item["text"]) # Fallback to original
+            modified_text = id_to_modified_text.get(
+                item["id"], item["text"]
+            )  # Fallback to original
             item["run_object"].text = modified_text
 
     elif mode == "reverse-words":
         click.echo("Applying word reversal on duplicated slides...")
-        id_to_modified_text = {} # Not strictly needed here but keeps structure similar
+        id_to_modified_text = {}  # Not strictly needed here but keeps structure similar
         for item in text_elements:
-            reversed_text = reverse_individual_words(item['text'])
-            item["run_object"].text = reversed_text # Apply directly
-        
+            reversed_text = reverse_individual_words(item["text"])
+            item["run_object"].text = reversed_text  # Apply directly
+
         click.echo("Text replaced with reversed-word text on duplicated slides.")
 
     prs.save(output_path)
