@@ -58,6 +58,124 @@ def reverse_individual_words(text_string_with_eol):
     return result
 
 
+def parse_page_range(range_str, total_slides):
+    """
+    Parses a page range string (e.g., "1,3-5,8-") into a set of 0-indexed page numbers.
+    Validates against total_slides. Raises click.BadParameter on error.
+    1-indexed page numbers are used in the input string.
+    """
+    selected_pages_0_indexed = set()
+
+    if total_slides == 0:
+        # If a range_str was provided for a presentation with no slides, it's an issue.
+        # If range_str is None or empty, this function might not even be called,
+        # or it could return an empty set, which is fine.
+        if range_str:  # Check if user actually specified a range for an empty deck
+            raise click.BadParameter(
+                f"Cannot specify page range '{range_str}' for a presentation with no slides."
+            )
+        return selected_pages_0_indexed  # Correctly returns empty set if no slides
+
+    # If range_str is None (meaning --pages not used), this function shouldn't be called by main.
+    # The caller (main) should handle that by selecting all pages.
+    # If range_str is an empty string (e.g., --pages=""), it's an invalid input if --pages was explicitly used.
+    if (
+        range_str is not None and not range_str.strip()
+    ):  # Check if --pages was used and an empty string was passed
+        raise click.BadParameter(
+            "Page range string cannot be empty if --pages option is used with an empty value."
+        )
+
+    parts = range_str.split(",")
+    for part_specifier in parts:
+        part = part_specifier.strip()
+        if not part:  # Handles cases like "1,,2" or leading/trailing commas
+            continue
+
+        if "-" in part:
+            # Range specifier
+            elements = part.split("-", 1)
+            start_str, end_str = elements[0].strip(), elements[1].strip()
+
+            start_page_1_indexed = None
+            end_page_1_indexed = None
+
+            if start_str:  # "N-M" or "N-"
+                try:
+                    start_page_1_indexed = int(start_str)
+                    if start_page_1_indexed < 1:
+                        raise click.BadParameter(
+                            f"Page numbers must be positive. Found start '{start_str}' in '{part_specifier}'."
+                        )
+                except ValueError:
+                    raise click.BadParameter(
+                        f"Invalid start page number '{start_str}' in '{part_specifier}'. Must be an integer."
+                    )
+            else:  # "-M"
+                start_page_1_indexed = 1  # Default start for ranges like "-5"
+
+            if end_str:  # "N-M" or "-M"
+                try:
+                    end_page_1_indexed = int(end_str)
+                    if end_page_1_indexed < 1:
+                        raise click.BadParameter(
+                            f"Page numbers must be positive. Found end '{end_str}' in '{part_specifier}'."
+                        )
+                except ValueError:
+                    raise click.BadParameter(
+                        f"Invalid end page number '{end_str}' in '{part_specifier}'. Must be an integer."
+                    )
+            else:  # "N-"
+                end_page_1_indexed = total_slides  # Default end for ranges like "5-"
+
+            if start_page_1_indexed > end_page_1_indexed:
+                raise click.BadParameter(
+                    f"Start page {start_page_1_indexed} cannot be greater than end page {end_page_1_indexed} in range '{part_specifier}'."
+                )
+
+            # Validate individual bounds against total_slides
+            if start_page_1_indexed > total_slides:
+                # This also covers cases where start_page_1_indexed was 1 (for "-M") but total_slides is 0 (already handled)
+                # or if user specifies "10-" for a 5-slide deck.
+                # No need to add to set if start is already beyond total slides.
+                click.echo(
+                    f"Warning: Start page {start_page_1_indexed} in range '{part_specifier}' is beyond the total of {total_slides} slides. This part of the range will select no pages.",
+                    err=True,
+                )
+                continue  # Skip this part of the range
+
+            # For "N-M" or "-M", if end_page_1_indexed was explicitly given and exceeds total_slides
+            if end_str and end_page_1_indexed > total_slides:
+                click.echo(
+                    f"Warning: End page {end_page_1_indexed} in range '{part_specifier}' is beyond the total of {total_slides} slides. Range will be capped at {total_slides}.",
+                    err=True,
+                )
+                # end_page_1_indexed will be capped by min() below.
+
+            # Add pages (0-indexed) to the set
+            # Cap end_page_1_indexed at total_slides for ranges like "N-" or valid "N-M"
+            # This loop will correctly handle start_page_1_indexed up to min(end_page_1_indexed, total_slides)
+            for i in range(
+                start_page_1_indexed, min(end_page_1_indexed, total_slides) + 1
+            ):
+                selected_pages_0_indexed.add(i - 1)
+        else:
+            # Single page specifier
+            try:
+                page_num_1_indexed = int(part)
+                if not (1 <= page_num_1_indexed <= total_slides):
+                    raise click.BadParameter(
+                        f"Page number {page_num_1_indexed} in '{part_specifier}' is out of valid range [1, {total_slides}]."
+                    )
+                selected_pages_0_indexed.add(page_num_1_indexed - 1)
+            except ValueError:
+                raise click.BadParameter(
+                    f"Invalid page number: '{part_specifier}'. Must be an integer."
+                )
+
+    return selected_pages_0_indexed
+
+
 @click.command()
 @click.option(
     "--mode",
@@ -69,15 +187,22 @@ def reverse_individual_words(text_string_with_eol):
     show_default=True,
     help="Operation mode for the script.",
 )
+@click.option(
+    "--pages",
+    type=str,
+    default=None,
+    help="Specify page range to process (e.g., '1,3-5,8-'). 1-indexed. Processes all pages if not specified.",
+)
 @click.argument("input_path", type=click.Path(exists=True, dir_okay=False))
 @click.argument("output_path", type=click.Path(dir_okay=False))
-def main(input_path, output_path, mode):
+def main(input_path, output_path, mode, pages):
     """
     Processes a PowerPoint presentation.
     It first copies the input presentation to the output path.
-    Then, for 'translate' and 'reverse-words' modes, text on the slides
+    Then, for 'translate' and 'reverse-words' modes, text on selected slides
     within this copied presentation is modified in place.
     'translate' mode uses an on-disk cache.
+    Page range can be specified using the --pages option.
     """
     cache_file_path = (
         "translation_cache.json"  # Cache file in the same directory as script execution
@@ -99,12 +224,60 @@ def main(input_path, output_path, mode):
         click.echo("Input presentation has no slides. Exiting.")
         return
 
-    slides_for_text_extraction = []
-    if mode == "translate" or mode == "reverse-words":
-        slides_for_text_extraction = list(prs.slides)
-        if slides_for_text_extraction:  # Only print if there are slides to process
+    selected_pages_0_indexed = set()
+    if pages:
+        try:
+            selected_pages_0_indexed = parse_page_range(pages, num_original_slides)
+        except click.BadParameter as e:
+            # parse_page_range raises BadParameter, which click handles by exiting.
+            # We can re-raise if we want to be explicit or add more context, but click does it.
+            # For now, let click handle the exit.
+            # click.echo(f"Error: {e}", err=True) # This would be redundant
+            raise  # Re-raise to ensure click handles it as expected
+    else:
+        # If --pages is not specified, process all slides
+        selected_pages_0_indexed = set(range(num_original_slides))
+
+    slides_to_process_objects = []
+    if num_original_slides > 0:
+        for i, slide_obj in enumerate(prs.slides):
+            if i in selected_pages_0_indexed:
+                slides_to_process_objects.append(slide_obj)
+
+    if not slides_to_process_objects:
+        if pages:  # User specified a range, but it resulted in no slides
             click.echo(
-                f"Preparing to process text on {len(slides_for_text_extraction)} slide(s) in the copied presentation..."
+                f"Warning: The specified page range '{pages}' resulted in no slides being selected from {num_original_slides} total slides. No text processing will occur."
+            )
+        else:  # No pages specified, but presentation was empty (already handled) or became empty (should not happen here)
+            click.echo(
+                f"No slides selected for processing from {num_original_slides} total slides. No text processing will occur."
+            )
+        # Save the copied presentation and exit if no slides are to be processed.
+        # This is important if only a copy was intended or if the range was valid but empty.
+        prs.save(output_path)
+        click.echo(f"Presentation saved (no text modifications) to: {output_path}")
+        # Save cache even if no text elements were processed, in case it was loaded and needs to be preserved.
+        if mode == "translate":
+            translation_cache = load_cache(
+                cache_file_path
+            )  # Ensure cache is loaded if not already
+            save_cache(translation_cache, cache_file_path)
+        return
+
+    # Renaming slides_for_text_extraction to slides_to_process_objects for clarity
+    # The old slides_for_text_extraction is now slides_to_process_objects
+
+    # The original logic for 'slides_for_text_extraction' initialization is now replaced by the above.
+    # The following 'if mode == "translate" or mode == "reverse-words":' block's content
+    # related to populating slides_for_text_extraction is no longer needed here as slides_to_process_objects is already set.
+    # We just need to update the logging.
+
+    if mode == "translate" or mode == "reverse-words":
+        # slides_for_text_extraction = list(prs.slides) # This line is now replaced by slides_to_process_objects logic
+        if slides_to_process_objects:  # Only print if there are slides to process
+            click.echo(
+                f"Preparing to process text on {len(slides_to_process_objects)} selected slide(s) (out of {num_original_slides} total) in the copied presentation..."
             )
     # 'duplicate-only' mode and slide duplication logic removed.
     # Text processing will now occur directly on the slides in 'slides_for_text_extraction'.
@@ -119,11 +292,11 @@ def main(input_path, output_path, mode):
         texts_for_llm_prompt = []
         all_text_elements_with_status = []
 
-        if slides_for_text_extraction:
+        if slides_to_process_objects:
             click.echo(
-                f"Extracting text from {len(slides_for_text_extraction)} slides in the copied presentation for mode '{mode}' (with cache checking)..."
+                f"Extracting text from {len(slides_to_process_objects)} slides in the copied presentation for mode '{mode}' (with cache checking)..."
             )
-            for slide_to_extract in slides_for_text_extraction:
+            for slide_to_extract in slides_to_process_objects:
                 for shape in slide_to_extract.shapes:
                     if shape.has_text_frame:
                         for paragraph in shape.text_frame.paragraphs:
@@ -371,11 +544,11 @@ def main(input_path, output_path, mode):
     elif mode == "reverse-words":
         # Original logic for reverse-words, uses a simple text_elements list
         text_elements_for_reverse = []
-        if slides_for_text_extraction:
+        if slides_to_process_objects:
             click.echo(
-                f"Extracting text from {len(slides_for_text_extraction)} slides in the copied presentation for mode '{mode}'..."
+                f"Extracting text from {len(slides_to_process_objects)} slides in the copied presentation for mode '{mode}'..."
             )
-            for slide_to_extract in slides_for_text_extraction:
+            for slide_to_extract in slides_to_process_objects:
                 for shape in slide_to_extract.shapes:
                     if shape.has_text_frame:
                         for paragraph in shape.text_frame.paragraphs:
