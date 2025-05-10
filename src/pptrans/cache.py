@@ -21,7 +21,7 @@ def load_cache(cache_file_path) -> dict:
     return {}
 
 
-def save_cache(cache_data, cache_file_path):
+def save_cache(cache_data, cache_file_path) -> None:
     """Saves the translation cache to a JSON file."""
     try:
         with open(cache_file_path, "w", encoding="utf-8") as f:

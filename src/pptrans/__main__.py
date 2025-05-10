@@ -48,7 +48,7 @@ def reverse_individual_words(text_string_with_eol):
 )
 @click.argument("input_path", type=click.Path(exists=True, dir_okay=False))
 @click.argument("output_path", type=click.Path(dir_okay=False))
-def main(input_path, output_path, mode, pages):
+def main(input_path, output_path, mode, pages) -> None:
     """Processes a PowerPoint presentation.
     It first copies the input presentation to the output path.
     Then, for 'translate' and 'reverse-words' modes, text on selected slides
@@ -125,7 +125,7 @@ def main(input_path, output_path, mode, pages):
     # related to populating slides_for_text_extraction is no longer needed here as slides_to_process_objects is already set.
     # We just need to update the logging.
 
-    if mode == "translate" or mode == "reverse-words":
+    if mode in {"translate", "reverse-words"}:
         # slides_for_text_extraction = list(prs.slides) # This line is now replaced by slides_to_process_objects logic
         if slides_to_process_objects:  # Only print if there are slides to process
             click.echo(
@@ -170,8 +170,8 @@ def main(input_path, output_path, mode, pages):
                                         }
                                     )
                     if shape.has_table:
-                        for row_idx, row in enumerate(shape.table.rows):
-                            for col_idx, cell in enumerate(row.cells):
+                        for _row_idx, row in enumerate(shape.table.rows):
+                            for _col_idx, cell in enumerate(row.cells):
                                 for paragraph in cell.text_frame.paragraphs:
                                     for run in paragraph.runs:
                                         original_text = run.text
@@ -487,7 +487,6 @@ def main(input_path, output_path, mode, pages):
             if (
                 page_hash in pending_page_cache_updates
             ):  # Indicates LLM was involved for this page
-                rebuilt_page_cache_entry = []
                 # Find all runs associated with this page_hash from all_processed_run_details
                 # This is inefficient if done here. Better to build pending_page_cache_updates correctly during LLM response processing.
                 # For now, let's assume pending_page_cache_updates[page_hash] has the full list for pages that had misses/LLM calls.
