@@ -119,13 +119,25 @@ def copy_slide(src_presentation, new_presentation, slide_to_copy_index):
 # --- End Slide Copying Logic ---
 
 
+def reverse_individual_words(text_string):
+    """Reverses each word in a space-separated string."""
+    words = text_string.split(' ')
+    reversed_words = [word[::-1] for word in words]
+    return ' '.join(reversed_words)
+
+
 @click.command()
+@click.option('--mode', type=click.Choice(['translate', 'duplicate-only', 'reverse-words'], case_sensitive=False), default='translate', show_default=True, help='Operation mode for the script.')
 @click.argument("input_path", type=click.Path(exists=True, dir_okay=False))
 @click.argument("output_path", type=click.Path(dir_okay=False))
-def main(input_path, output_path):
+def main(input_path, output_path, mode):
     """
-    Translates text in a PowerPoint presentation from Finnish to English.
-    Duplicates each slide, translates the duplicated slide, and saves to a new file.
+    Processes a PowerPoint presentation by duplicating slides and optionally modifying text.
+
+    Modes:
+    - translate: Duplicates each slide and translates text on the copy from Finnish to English.
+    - duplicate-only: Duplicates each slide without any text modification.
+    - reverse-words: Duplicates each slide and reverses each word on the copy.
     """
     click.echo(f"Loading presentation from: {input_path}")
     prs = Presentation(input_path)
