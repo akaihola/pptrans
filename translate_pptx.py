@@ -1,24 +1,28 @@
+import copy  # For deepcopying elements
+
 import click
+import llm  # Simon Willison's LLM library
 from pptx import Presentation
-from pptx.util import Inches, Pt
 from pptx.enum.shapes import MSO_SHAPE_TYPE
-import llm # Simon Willison's LLM library
-import copy # For deepcopying elements
+from pptx.util import Inches, Pt
+
 # import xml.etree.ElementTree as ET # Not strictly needed if using copy.deepcopy for lxml
+
 
 # --- Slide Copying Logic (Adapted from https://stackoverflow.com/a/73954830/15770) ---
 def _get_blank_slide_layout(pres):
     """Return a blank slide layout from pres"""
-    layout_items = [layout for layout in pres.slide_layouts if layout.name == 'Blank']
+    layout_items = [layout for layout in pres.slide_layouts if layout.name == "Blank"]
     if not layout_items:
         # Fallback if "Blank" layout is not found by name (e.g. different language versions)
         # In many default templates, layout index 5 or 6 is often Blank.
         # This is a heuristic and might need adjustment for specific templates.
         if len(pres.slide_layouts) > 5:
-            return pres.slide_layouts[5] # Common index for Blank
-        else: # If very few layouts, pick the last one as a desperate fallback
+            return pres.slide_layouts[5]  # Common index for Blank
+        else:  # If very few layouts, pick the last one as a desperate fallback
             return pres.slide_layouts[-1]
     return layout_items[0]
+
 
 def copy_slide(src_presentation, new_presentation, slide_to_copy_index):
     """
@@ -36,34 +40,38 @@ def copy_slide(src_presentation, new_presentation, slide_to_copy_index):
     # A truly robust solution involves copying slide masters and layouts first.
     # For this script, we assume new_presentation starts blank and we add to it.
     # python-pptx creates a default master when Presentation() is called.
-    
+
     # Try to find layout by name (less reliable across different base templates)
     # Fallback to using the source slide's layout object directly if it's from the same master pool,
     # or a default blank layout.
     target_layout = None
-    if new_presentation.slide_masters: # Check if new_prs has any masters
+    if new_presentation.slide_masters:  # Check if new_prs has any masters
         try:
             # This assumes new_presentation has been prepared with necessary layouts
             # or that default layouts are sufficient.
-            target_layout = new_presentation.slide_layouts.get_by_name(src_slide.slide_layout.name)
-        except KeyError: # get_by_name raises KeyError if not found
-            pass # target_layout remains None
-    
+            target_layout = new_presentation.slide_layouts.get_by_name(
+                src_slide.slide_layout.name
+            )
+        except KeyError:  # get_by_name raises KeyError if not found
+            pass  # target_layout remains None
+
     if target_layout is None:
         # If specific layout not found, or new_presentation has no masters yet (should not happen with Presentation())
         # fall back to a blank layout from new_presentation.
         # If new_presentation is truly empty (e.g. no default master), this would also need care.
         # However, Presentation() initializes with a default master & layouts.
         target_layout = _get_blank_slide_layout(new_presentation)
-        
+
     new_slide = new_presentation.slides.add_slide(target_layout)
 
     # Copy shapes from source slide to new slide
     for shape in src_slide.shapes:
         el = shape.element
         # new_el = ET.fromstring(ET.tostring(el)) # Deep copy using standard library XML
-        new_el = copy.deepcopy(el) # Deep copy using lxml's capabilities via python-pptx's element objects
-        new_slide.shapes._spTree.insert_element_before(new_el, 'p:extLst')
+        new_el = copy.deepcopy(
+            el
+        )  # Deep copy using lxml's capabilities via python-pptx's element objects
+        new_slide.shapes._spTree.insert_element_before(new_el, "p:extLst")
         # Note: This low-level shape copy is effective for many shape types including text boxes.
         # However, for shapes with complex relationships (e.g., linked charts, embedded media not stored directly in shape XML),
         # their `rId`s (relationship IDs) would need to be managed by copying the related parts
@@ -74,24 +82,30 @@ def copy_slide(src_presentation, new_presentation, slide_to_copy_index):
 
     # Copy background (simplified)
     # A full background copy would also consider slide master and layout backgrounds.
-    if src_slide.background.fill.type: # Check if there's a fill type set
-        new_slide.background.fill.solid() # Ensure fill is solid before setting color
+    if src_slide.background.fill.type:  # Check if there's a fill type set
+        new_slide.background.fill.solid()  # Ensure fill is solid before setting color
         # This is a very basic color copy. More complex fills (gradient, picture) are not fully handled here.
-        if hasattr(src_slide.background.fill, 'fore_color') and src_slide.background.fill.fore_color:
-            if hasattr(src_slide.background.fill.fore_color, 'rgb'):
-                 new_slide.background.fill.fore_color.rgb = src_slide.background.fill.fore_color.rgb
+        if (
+            hasattr(src_slide.background.fill, "fore_color")
+            and src_slide.background.fill.fore_color
+        ):
+            if hasattr(src_slide.background.fill.fore_color, "rgb"):
+                new_slide.background.fill.fore_color.rgb = (
+                    src_slide.background.fill.fore_color.rgb
+                )
             # elif hasattr(src_slide.background.fill.fore_color, 'theme_color'):
             #     new_slide.background.fill.fore_color.theme_color = src_slide.background.fill.fore_color.theme_color
 
-
     # Notes slide copying is omitted for simplicity as per PLAN.md scope.
     return new_slide
+
+
 # --- End Slide Copying Logic ---
 
 
 @click.command()
-@click.argument('input_path', type=click.Path(exists=True, dir_okay=False))
-@click.argument('output_path', type=click.Path(dir_okay=False))
+@click.argument("input_path", type=click.Path(exists=True, dir_okay=False))
+@click.argument("output_path", type=click.Path(dir_okay=False))
 def main(input_path, output_path):
     """
     Translates text in a PowerPoint presentation from Finnish to English.
@@ -99,7 +113,7 @@ def main(input_path, output_path):
     """
     click.echo(f"Loading presentation from: {input_path}")
     prs = Presentation(input_path)
-    new_prs = Presentation() # Create a new presentation for the output
+    new_prs = Presentation()  # Create a new presentation for the output
 
     # Make sure new_prs has the same slide masters and layouts as prs
     # This is a simplified approach; a full copy would involve iterating masters.
@@ -111,16 +125,18 @@ def main(input_path, output_path):
 
     text_elements = []
     text_id_counter = 0
-    
+
     slides_for_text_extraction = []
 
     click.echo("Processing slides...")
     for i, slide in enumerate(prs.slides):
-        click.echo(f"  Copying original slide {i+1}...")
-        copy_slide(prs, new_prs, i) # Copy original slide (first copy)
-        
-        click.echo(f"  Copying slide {i+1} for translation (second copy)...")
-        translated_slide_candidate = copy_slide(prs, new_prs, i) # Copy slide again for translation
+        click.echo(f"  Copying original slide {i + 1}...")
+        copy_slide(prs, new_prs, i)  # Copy original slide (first copy)
+
+        click.echo(f"  Copying slide {i + 1} for translation (second copy)...")
+        translated_slide_candidate = copy_slide(
+            prs, new_prs, i
+        )  # Copy slide again for translation
         slides_for_text_extraction.append(translated_slide_candidate)
 
     click.echo("Extracting text from duplicated slides...")
@@ -130,9 +146,15 @@ def main(input_path, output_path):
                 for paragraph in shape.text_frame.paragraphs:
                     for run in paragraph.runs:
                         original_text = run.text.strip()
-                        if original_text: # Only process non-empty runs
+                        if original_text:  # Only process non-empty runs
                             text_id = f"text_{text_id_counter}"
-                            text_elements.append({'id': text_id, 'text': original_text, 'run_object': run})
+                            text_elements.append(
+                                {
+                                    "id": text_id,
+                                    "text": original_text,
+                                    "run_object": run,
+                                }
+                            )
                             text_id_counter += 1
             if shape.has_table:
                 for row in shape.table.rows:
@@ -140,11 +162,17 @@ def main(input_path, output_path):
                         for paragraph in cell.text_frame.paragraphs:
                             for run in paragraph.runs:
                                 original_text = run.text.strip()
-                                if original_text: # Only process non-empty runs
+                                if original_text:  # Only process non-empty runs
                                     text_id = f"text_{text_id_counter}"
-                                    text_elements.append({'id': text_id, 'text': original_text, 'run_object': run})
+                                    text_elements.append(
+                                        {
+                                            "id": text_id,
+                                            "text": original_text,
+                                            "run_object": run,
+                                        }
+                                    )
                                     text_id_counter += 1
-    
+
     if not text_elements:
         click.echo("No text found to translate.")
         new_prs.save(output_path)
@@ -153,8 +181,10 @@ def main(input_path, output_path):
 
     click.echo(f"Found {len(text_elements)} text elements to translate.")
 
-    formatted_text = "\n".join([f"{item['id']}: {item['text']}" for item in text_elements])
-    
+    formatted_text = "\n".join(
+        [f"{item['id']}: {item['text']}" for item in text_elements]
+    )
+
     prompt = (
         "You are an expert Finnish to English translator. "
         "Translate the following text segments accurately from Finnish to English. "
@@ -174,10 +204,12 @@ def main(input_path, output_path):
 
     click.echo("Sending text to LLM for translation...")
     # Using a placeholder for filename, as from_text doesn't strictly need it.
-    attachment = llm.Attachment.from_text(formatted_text, filename="texts_to_translate.txt")
-    model = llm.get_model() # Get default model
+    attachment = llm.Attachment.from_text(
+        formatted_text, filename="texts_to_translate.txt"
+    )
+    model = llm.get_model()  # Get default model
     response = model.prompt(prompt, attachments=[attachment])
-    
+
     translated_text_response = response.text()
     click.echo("Received translation from LLM.")
 
@@ -199,11 +231,14 @@ def main(input_path, output_path):
 
     click.echo("Replacing text with translations...")
     for item in text_elements:
-        translated_text = id_to_translation.get(item['id'], item['text']) # Fallback to original
-        item['run_object'].text = translated_text
-        
+        translated_text = id_to_translation.get(
+            item["id"], item["text"]
+        )  # Fallback to original
+        item["run_object"].text = translated_text
+
     new_prs.save(output_path)
     click.echo(f"Translated presentation saved to: {output_path}")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
