@@ -3,7 +3,8 @@ from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 import llm # Simon Willison's LLM library
-import xml.etree.ElementTree as ET # For slide copying
+import copy # For deepcopying elements
+# import xml.etree.ElementTree as ET # Not strictly needed if using copy.deepcopy for lxml
 
 # --- Slide Copying Logic (Adapted from https://stackoverflow.com/a/73954830/15770) ---
 def _get_blank_slide_layout(pres):
@@ -29,47 +30,61 @@ def copy_slide(src_presentation, new_presentation, slide_to_copy_index):
     """
     src_slide = src_presentation.slides[slide_to_copy_index]
 
-    # Create a new slide in the target presentation, using the same layout as the source slide.
-    # This requires the layout to exist in the target presentation's slide master.
-    # For simplicity here, we'll try to use the source slide's layout.
-    # A more robust solution would involve copying slide masters and layouts first if they don't exist.
-    try:
-        slide_layout = new_presentation.slide_layouts.get_by_name(src_slide.slide_layout.name)
-        if slide_layout is None: # If layout not found by name, use a default blank one
-            slide_layout = _get_blank_slide_layout(new_presentation)
-    except Exception: # Broad exception if get_by_name fails or other issues
-        slide_layout = _get_blank_slide_layout(new_presentation)
+    # Create a new slide in the target presentation.
+    # Attempt to use the same layout as the source slide.
+    # If the named layout doesn't exist in new_presentation's master, this will fail or use a default.
+    # A truly robust solution involves copying slide masters and layouts first.
+    # For this script, we assume new_presentation starts blank and we add to it.
+    # python-pptx creates a default master when Presentation() is called.
+    
+    # Try to find layout by name (less reliable across different base templates)
+    # Fallback to using the source slide's layout object directly if it's from the same master pool,
+    # or a default blank layout.
+    target_layout = None
+    if new_presentation.slide_masters: # Check if new_prs has any masters
+        try:
+            # This assumes new_presentation has been prepared with necessary layouts
+            # or that default layouts are sufficient.
+            target_layout = new_presentation.slide_layouts.get_by_name(src_slide.slide_layout.name)
+        except KeyError: # get_by_name raises KeyError if not found
+            pass # target_layout remains None
+    
+    if target_layout is None:
+        # If specific layout not found, or new_presentation has no masters yet (should not happen with Presentation())
+        # fall back to a blank layout from new_presentation.
+        # If new_presentation is truly empty (e.g. no default master), this would also need care.
+        # However, Presentation() initializes with a default master & layouts.
+        target_layout = _get_blank_slide_layout(new_presentation)
         
-    new_slide = new_presentation.slides.add_slide(slide_layout)
+    new_slide = new_presentation.slides.add_slide(target_layout)
 
     # Copy shapes from source slide to new slide
     for shape in src_slide.shapes:
         el = shape.element
-        new_el = ET.fromstring(ET.tostring(el)) # Deep copy of element
+        # new_el = ET.fromstring(ET.tostring(el)) # Deep copy using standard library XML
+        new_el = copy.deepcopy(el) # Deep copy using lxml's capabilities via python-pptx's element objects
         new_slide.shapes._spTree.insert_element_before(new_el, 'p:extLst')
-        # Note: This is a low-level way to add shapes. Relationships (like images, charts)
-        # might need explicit handling (relIds need to be copied and potentially updated).
-        # The original SO answer has more comprehensive handling for this.
-        # For text, this should generally work.
+        # Note: This low-level shape copy is effective for many shape types including text boxes.
+        # However, for shapes with complex relationships (e.g., linked charts, embedded media not stored directly in shape XML),
+        # their `rId`s (relationship IDs) would need to be managed by copying the related parts
+        # from the source presentation package to the target and updating these rIds.
+        # The referenced StackOverflow answer provides a much more comprehensive solution for this.
+        # This script prioritizes text translation and assumes simpler content or that visual fidelity
+        # issues from missing linked parts are acceptable for its primary goal.
 
-    # Copy background
-    if src_slide.has_notes_slide: # Check if notes_slide exists
-        # notes_slide background copy is more complex and omitted for this version
-        pass
-
-    if src_slide.background.fill.type:
-        new_slide.background.fill.type = src_slide.background.fill.type
-        if src_slide.background.fill.type == MSO_SHAPE_TYPE.PICTURE:
-             # Picture fill copy is complex (requires image part) and omitted
-            pass
-        elif src_slide.background.fill.fore_color:
-            new_slide.background.fill.fore_color.rgb = src_slide.background.fill.fore_color.rgb
+    # Copy background (simplified)
+    # A full background copy would also consider slide master and layout backgrounds.
+    if src_slide.background.fill.type: # Check if there's a fill type set
+        new_slide.background.fill.solid() # Ensure fill is solid before setting color
+        # This is a very basic color copy. More complex fills (gradient, picture) are not fully handled here.
+        if hasattr(src_slide.background.fill, 'fore_color') and src_slide.background.fill.fore_color:
+            if hasattr(src_slide.background.fill.fore_color, 'rgb'):
+                 new_slide.background.fill.fore_color.rgb = src_slide.background.fill.fore_color.rgb
+            # elif hasattr(src_slide.background.fill.fore_color, 'theme_color'):
+            #     new_slide.background.fill.fore_color.theme_color = src_slide.background.fill.fore_color.theme_color
 
 
-    # Copy slide master background (if not overridden by slide background)
-    # This is also complex and omitted for brevity in this adaptation.
-    # The full SO answer attempts to handle this by looking at `slideLayout.slideMaster.background`.
-
+    # Notes slide copying is omitted for simplicity as per PLAN.md scope.
     return new_slide
 # --- End Slide Copying Logic ---
 
@@ -141,16 +156,20 @@ def main(input_path, output_path):
     formatted_text = "\n".join([f"{item['id']}: {item['text']}" for item in text_elements])
     
     prompt = (
-        "Translate the following text segments from Finnish to English. "
-        "Each segment is prefixed with an ID. "
-        "Return the translations in the exact same format, preserving the IDs, with each translation on a new line.\n"
+        "You are an expert Finnish to English translator. "
+        "Translate the following text segments accurately from Finnish to English. "
+        "Each segment is prefixed with a unique ID (e.g., text_0, text_1). "
+        "Your response MUST consist ONLY of the translated segments, each prefixed with its original ID, "
+        "and each on a new line. Maintain the exact ID and format.\n"
         "For example, if you receive:\n"
-        "ID1: Hei maailma\n"
-        "ID2: Kiitos\n"
-        "You should return:\n"
-        "ID1: Hello world\n"
-        "ID2: Thank you\n\n"
-        "Here are the texts to translate:\n"
+        "text_0: Hei maailma\n"
+        "text_1: Kiitos paljon\n"
+        "You MUST return:\n"
+        "text_0: Hello world\n"
+        "text_1: Thank you very much\n\n"
+        "Do not add any extra explanations, apologies, or introductory/concluding remarks. "
+        "Only provide the ID followed by the translated text for each item.\n\n"
+        "Texts to translate:\n"
     )
 
     click.echo("Sending text to LLM for translation...")
