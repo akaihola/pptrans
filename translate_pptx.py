@@ -82,17 +82,33 @@ def copy_slide(src_presentation, new_presentation, slide_to_copy_index):
 
     # Copy background (simplified)
     # A full background copy would also consider slide master and layout backgrounds.
+    print(
+        f"DEBUG: Slide {slide_to_copy_index + 1} background fill object: {src_slide.background.fill}"
+    )
+    print(
+        f"DEBUG: Slide {slide_to_copy_index + 1} background fill type: {src_slide.background.fill.type}"
+    )
     if src_slide.background.fill.type:  # Check if there's a fill type set
         new_slide.background.fill.solid()  # Ensure fill is solid before setting color
         # This is a very basic color copy. More complex fills (gradient, picture) are not fully handled here.
-        if (
-            hasattr(src_slide.background.fill, "fore_color")
-            and src_slide.background.fill.fore_color
-        ):
-            if hasattr(src_slide.background.fill.fore_color, "rgb"):
-                new_slide.background.fill.fore_color.rgb = (
-                    src_slide.background.fill.fore_color.rgb
-                )
+        try:
+            # Attempt to get the source foreground color's RGB value
+            # This line might raise TypeError if fore_color is not directly available (e.g., _NoFill, or inherited)
+            # or AttributeError if .rgb is not present.
+            src_rgb = src_slide.background.fill.fore_color.rgb
+            # If successful, apply it to the new slide's foreground color
+            new_slide.background.fill.fore_color.rgb = src_rgb
+        except TypeError:
+            # This typically occurs if src_slide.background.fill.fore_color itself raises
+            # the "fill type ... has no foreground color" error.
+            print(
+                f"DEBUG: Slide {slide_to_copy_index + 1} - TypeError: No direct foreground color to copy or not an RGBColor object."
+            )
+        except AttributeError:
+            # This could occur if fore_color exists but is None, or doesn't have an .rgb attribute.
+            print(
+                f"DEBUG: Slide {slide_to_copy_index + 1} - AttributeError: Foreground color attribute missing or not an RGBColor object."
+            )
             # elif hasattr(src_slide.background.fill.fore_color, 'theme_color'):
             #     new_slide.background.fill.fore_color.theme_color = src_slide.background.fill.fore_color.theme_color
 
