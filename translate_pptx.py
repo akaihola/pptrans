@@ -211,10 +211,19 @@ def main(input_path, output_path, mode):
             "Only provide the ID followed by the translated text for each item.\n\n"
             "Texts to translate:\n"
         )
+        click.echo("--- PROMPT TO LLM ---")
+        click.echo("System/Instruction Prompt:")
+        click.echo(prompt)
+        click.echo("Data Fragments:")
+        click.echo(formatted_text)
+        click.echo("--- END OF PROMPT ---")
         click.echo("Sending text to LLM for translation...")
         model = llm.get_model()  # Assumes llm is configured
         response = model.prompt(prompt, fragments=[formatted_text])
         translated_text_response = response.text()
+        click.echo("--- RESPONSE FROM LLM ---")
+        click.echo(translated_text_response)
+        click.echo("--- END OF RESPONSE ---")
         click.echo("Received translation from LLM.")
 
         id_to_modified_text = {}
