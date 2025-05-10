@@ -39,29 +39,6 @@ def save_cache(cache_data, cache_file_path):
         )
 
 
-def _duplicate_slide_to_end(pres, source_slide):
-    """
-    Duplicates the source_slide and appends the copy to the end of the presentation.
-    Returns the newly created (duplicated) slide.
-    """
-    target_layout = source_slide.slide_layout
-    new_slide = pres.slides.add_slide(target_layout)
-
-    for shape in source_slide.shapes:
-        el = shape.element
-        new_el = copy.deepcopy(el)
-        new_slide.shapes._spTree.insert_element_before(new_el, "p:extLst")
-
-    if source_slide.background.fill.type:
-        new_slide.background.fill.solid()
-        try:
-            src_rgb = source_slide.background.fill.fore_color.rgb
-            new_slide.background.fill.fore_color.rgb = src_rgb
-        except (TypeError, AttributeError):
-            pass
-    return new_slide
-
-
 def reverse_individual_words(text_string_with_eol):
     """
     Reverses each word in a space-separated string, preserving an EOL_MARKER if present.
@@ -85,7 +62,8 @@ def reverse_individual_words(text_string_with_eol):
 @click.option(
     "--mode",
     type=click.Choice(
-        ["translate", "duplicate-only", "reverse-words"], case_sensitive=False
+        ["translate", "reverse-words"],
+        case_sensitive=False,  # 'duplicate-only' mode removed
     ),
     default="translate",
     show_default=True,
@@ -96,12 +74,10 @@ def reverse_individual_words(text_string_with_eol):
 def main(input_path, output_path, mode):
     """
     Processes a PowerPoint presentation.
-    In 'translate', 'reverse-words', and 'duplicate-only' modes, it first copies the input
-    presentation to the output path. Then, it duplicates each original slide and appends
-    the copy to the end of the presentation. For 'translate' and 'reverse-words' modes,
-    text on these duplicated slides is then modified. 'translate' mode uses an on-disk cache.
-
-    Output slide order: Original_Slide_1, ..., Original_Slide_N, Modified_Slide_1, ..., Modified_Slide_N
+    It first copies the input presentation to the output path.
+    Then, for 'translate' and 'reverse-words' modes, text on the slides
+    within this copied presentation is modified in place.
+    'translate' mode uses an on-disk cache.
     """
     cache_file_path = (
         "translation_cache.json"  # Cache file in the same directory as script execution
@@ -124,31 +100,14 @@ def main(input_path, output_path, mode):
         return
 
     slides_for_text_extraction = []
-
-    click.echo(
-        f"Duplicating {num_original_slides} original slide(s) to the end of the presentation..."
-    )
-    for i in range(num_original_slides):
-        original_slide = prs.slides[i]
-        click.echo(
-            f"  Duplicating original slide {i + 1} ('{original_slide.slide_layout.name}')..."
-        )
-        duplicated_slide = _duplicate_slide_to_end(prs, original_slide)
-        if mode == "translate" or mode == "reverse-words":
-            slides_for_text_extraction.append(duplicated_slide)
-        elif mode == "duplicate-only":
-            slides_for_text_extraction.append(
-                duplicated_slide
-            )  # Still add for consistent reporting
-        click.echo(f"    Slide {i + 1} duplicated. Total slides now: {len(prs.slides)}")
-
-    if mode == "duplicate-only":
-        click.echo(
-            "Mode 'duplicate-only': Text processing skipped. All slides (originals and their duplicates) are saved."
-        )
-        prs.save(output_path)
-        click.echo(f"Presentation saved in '{mode}' mode to: {output_path}")
-        return
+    if mode == "translate" or mode == "reverse-words":
+        slides_for_text_extraction = list(prs.slides)
+        if slides_for_text_extraction:  # Only print if there are slides to process
+            click.echo(
+                f"Preparing to process text on {len(slides_for_text_extraction)} slide(s) in the copied presentation..."
+            )
+    # 'duplicate-only' mode and slide duplication logic removed.
+    # Text processing will now occur directly on the slides in 'slides_for_text_extraction'.
 
     # Text processing for 'translate' and 'reverse-words' modes
     text_id_counter = 0  # Shared counter for text element IDs
@@ -162,7 +121,7 @@ def main(input_path, output_path, mode):
 
         if slides_for_text_extraction:
             click.echo(
-                f"Extracting text from {len(slides_for_text_extraction)} duplicated slides for mode '{mode}' (with cache checking)..."
+                f"Extracting text from {len(slides_for_text_extraction)} slides in the copied presentation for mode '{mode}' (with cache checking)..."
             )
             for slide_to_extract in slides_for_text_extraction:
                 for shape in slide_to_extract.shapes:
@@ -264,7 +223,7 @@ def main(input_path, output_path, mode):
 
         if not all_text_elements_with_status:
             click.echo(
-                f"No text found to process on duplicated slides for mode '{mode}'."
+                f"No text found to process on slides in the copied presentation for mode '{mode}'."
             )
             prs.save(output_path)
             click.echo(
@@ -288,7 +247,7 @@ def main(input_path, output_path, mode):
             )
             formatted_text_for_llm = "\n".join(
                 [
-                    f"{item['id']}: {item['text_to_send']}"
+                    f"{item['id']}:{item['text_to_send']}"
                     for item in texts_for_llm_prompt
                 ]  # Use text_to_send
             )
@@ -399,7 +358,9 @@ def main(input_path, output_path, mode):
                         err=True,
                     )
 
-        click.echo("Replacing text with translations on duplicated slides...")
+        click.echo(
+            "Replacing text with translations on slides in the copied presentation..."
+        )
         for item in all_text_elements_with_status:
             if item["translation"]:
                 item["run_object"].text = item["translation"]
@@ -412,7 +373,7 @@ def main(input_path, output_path, mode):
         text_elements_for_reverse = []
         if slides_for_text_extraction:
             click.echo(
-                f"Extracting text from {len(slides_for_text_extraction)} duplicated slides for mode '{mode}'..."
+                f"Extracting text from {len(slides_for_text_extraction)} slides in the copied presentation for mode '{mode}'..."
             )
             for slide_to_extract in slides_for_text_extraction:
                 for shape in slide_to_extract.shapes:
@@ -453,7 +414,7 @@ def main(input_path, output_path, mode):
 
         if not text_elements_for_reverse:
             click.echo(
-                f"No text found to process on duplicated slides for mode '{mode}'."
+                f"No text found to process on slides in the copied presentation for mode '{mode}'."
             )
             prs.save(output_path)
             click.echo(
@@ -464,14 +425,16 @@ def main(input_path, output_path, mode):
         click.echo(
             f"Found {len(text_elements_for_reverse)} text elements to process for mode '{mode}'."
         )
-        click.echo("Applying word reversal on duplicated slides...")
+        click.echo("Applying word reversal on slides in the copied presentation...")
         for item in text_elements_for_reverse:
             reversed_text_with_eol = reverse_individual_words(item["text"])
             final_reversed_text = reversed_text_with_eol
             if final_reversed_text.endswith(EOL_MARKER):
                 final_reversed_text = final_reversed_text[: -len(EOL_MARKER)]
             item["run_object"].text = final_reversed_text
-        click.echo("Text replaced with reversed-word text on duplicated slides.")
+        click.echo(
+            "Text replaced with reversed-word text on slides in the copied presentation."
+        )
 
     prs.save(output_path)
     click.echo(f"Presentation saved in '{mode}' mode to: {output_path}")
