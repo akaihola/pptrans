@@ -22,6 +22,14 @@ gemini = ["llm-gemini"]
 [project.scripts]
 pptrans = "pptrans.__main__:main"
 
+[dependency-groups]
+dev = [
+    "mypy",
+    "pytest",
+    "pytest-kwparametrize",
+    "pytest-mock",
+]
+
 [project.urls]
 Home = "https://github.com/akaihola/pptrans"
 
@@ -67,7 +75,12 @@ unfixable = []
     "ANN001",  # Missing type annotation for function argument
     "ANN201",  # Missing return type annotation for public function
     "ANN204",  # Missing return type annotation for special method `__init__`
+    "ANN401",  # Dynamically typed expressions (typing.Any) are disallowed
+    "FBT001",  # Boolean-typed positional argument in function definition
     "INP001",  # File is part of an implicit namespace package. Add an `__init__.py`.
     "C408",  # Unnecessary `dict` call (rewrite as a literal)
+    "D105",  # Missing docstring in magic method
+    "D107",  # Missing docstring in `__init__`
+    "PLR0913",  # Too many arguments in function definition
     "S101",  # Use of `assert` detected
 ]
