@@ -161,109 +161,124 @@ def main(input_path, output_path, mode):
         click.echo(f"  Copying original slide {i + 1}...")
         copy_slide(prs, new_prs, i)  # Copy original slide (first copy)
 
-        click.echo(f"  Copying slide {i + 1} for translation (second copy)...")
-        translated_slide_candidate = copy_slide(
+        click.echo(f"  Copying slide {i + 1} for modification (second copy)...")
+        modified_slide_candidate = copy_slide(
             prs, new_prs, i
-        )  # Copy slide again for translation
-        slides_for_text_extraction.append(translated_slide_candidate)
+        )  # Copy slide again for modification
+        if mode == "translate" or mode == "reverse-words":
+            slides_for_text_extraction.append(modified_slide_candidate)
 
-    click.echo("Extracting text from duplicated slides...")
-    for slide_to_extract in slides_for_text_extraction:
-        for shape in slide_to_extract.shapes:
-            if shape.has_text_frame:
-                for paragraph in shape.text_frame.paragraphs:
-                    for run in paragraph.runs:
-                        original_text = run.text.strip()
-                        if original_text:  # Only process non-empty runs
-                            text_id = f"text_{text_id_counter}"
-                            text_elements.append(
-                                {
-                                    "id": text_id,
-                                    "text": original_text,
-                                    "run_object": run,
-                                }
-                            )
-                            text_id_counter += 1
-            if shape.has_table:
-                for row in shape.table.rows:
-                    for cell in row.cells:
-                        for paragraph in cell.text_frame.paragraphs:
-                            for run in paragraph.runs:
-                                original_text = run.text.strip()
-                                if original_text:  # Only process non-empty runs
-                                    text_id = f"text_{text_id_counter}"
-                                    text_elements.append(
-                                        {
-                                            "id": text_id,
-                                            "text": original_text,
-                                            "run_object": run,
-                                        }
-                                    )
-                                    text_id_counter += 1
-
-    if not text_elements:
-        click.echo("No text found to translate.")
+    if mode == "duplicate-only":
+        click.echo("Mode 'duplicate-only': Skipping text processing.")
         new_prs.save(output_path)
-        click.echo(f"Presentation saved without translation to: {output_path}")
+        click.echo(f"Presentation saved in '{mode}' mode to: {output_path}")
         return
 
-    click.echo(f"Found {len(text_elements)} text elements to translate.")
+    # Text processing for 'translate' and 'reverse-words' modes
+    if slides_for_text_extraction:
+        click.echo(f"Extracting text from duplicated slides for mode '{mode}'...")
+        for slide_to_extract in slides_for_text_extraction:
+            for shape in slide_to_extract.shapes:
+                if shape.has_text_frame:
+                    for paragraph in shape.text_frame.paragraphs:
+                        for run in paragraph.runs:
+                            original_text = run.text.strip()
+                            if original_text:  # Only process non-empty runs
+                                text_id = f"text_{text_id_counter}"
+                                text_elements.append(
+                                    {
+                                        "id": text_id,
+                                        "text": original_text,
+                                        "run_object": run,
+                                    }
+                                )
+                                text_id_counter += 1
+                if shape.has_table:
+                    for row in shape.table.rows:
+                        for cell in row.cells:
+                            for paragraph in cell.text_frame.paragraphs:
+                                for run in paragraph.runs:
+                                    original_text = run.text.strip()
+                                    if original_text:  # Only process non-empty runs
+                                        text_id = f"text_{text_id_counter}"
+                                        text_elements.append(
+                                            {
+                                                "id": text_id,
+                                                "text": original_text,
+                                                "run_object": run,
+                                            }
+                                        )
+                                        text_id_counter += 1
+    
+    if not text_elements:
+        click.echo(f"No text found to process for mode '{mode}'.")
+        new_prs.save(output_path)
+        click.echo(f"Presentation saved without text modification in '{mode}' mode to: {output_path}")
+        return
 
-    formatted_text = "\n".join(
-        [f"{item['id']}: {item['text']}" for item in text_elements]
-    )
+    click.echo(f"Found {len(text_elements)} text elements to process for mode '{mode}'.")
 
-    prompt = (
-        "You are an expert Finnish to English translator. "
-        "Translate the following text segments accurately from Finnish to English. "
-        "Each segment is prefixed with a unique ID (e.g., text_0, text_1). "
-        "Your response MUST consist ONLY of the translated segments, each prefixed with its original ID, "
-        "and each on a new line. Maintain the exact ID and format.\n"
-        "For example, if you receive:\n"
-        "text_0: Hei maailma\n"
-        "text_1: Kiitos paljon\n"
-        "You MUST return:\n"
-        "text_0: Hello world\n"
-        "text_1: Thank you very much\n\n"
-        "Do not add any extra explanations, apologies, or introductory/concluding remarks. "
-        "Only provide the ID followed by the translated text for each item.\n\n"
-        "Texts to translate:\n"
-    )
+    if mode == "translate":
+        formatted_text = "\n".join(
+            [f"{item['id']}: {item['text']}" for item in text_elements]
+        )
+        prompt = (
+            "You are an expert Finnish to English translator. "
+            "Translate the following text segments accurately from Finnish to English. "
+            "Each segment is prefixed with a unique ID (e.g., text_0, text_1). "
+            "Your response MUST consist ONLY of the translated segments, each prefixed with its original ID, "
+            "and each on a new line. Maintain the exact ID and format.\n"
+            "For example, if you receive:\n"
+            "text_0: Hei maailma\n"
+            "text_1: Kiitos paljon\n"
+            "You MUST return:\n"
+            "text_0: Hello world\n"
+            "text_1: Thank you very much\n\n"
+            "Do not add any extra explanations, apologies, or introductory/concluding remarks. "
+            "Only provide the ID followed by the translated text for each item.\n\n"
+            "Texts to translate:\n"
+        )
+        click.echo("Sending text to LLM for translation...")
+        model = llm.get_model()
+        response = model.prompt(prompt, fragments=[formatted_text])
+        translated_text_response = response.text()
+        click.echo("Received translation from LLM.")
 
-    click.echo("Sending text to LLM for translation...")
-    # Using a placeholder for filename, as from_text doesn't strictly need it.
-    model = llm.get_model()  # Get default model
-    # Pass the formatted_text as a fragment
-    response = model.prompt(prompt, fragments=[formatted_text])
+        id_to_modified_text = {}
+        for line in translated_text_response.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                parts = line.split(":", 1)
+                if len(parts) == 2:
+                    text_id = parts[0].strip()
+                    translation = parts[1].strip()
+                    id_to_modified_text[text_id] = translation
+                else:
+                    click.echo(f"Warning: Could not parse translation line: {line}")
+            except Exception as e:
+                click.echo(f"Warning: Error parsing translation line '{line}': {e}")
+        
+        click.echo("Replacing text with translations...")
+        for item in text_elements:
+            modified_text = id_to_modified_text.get(item["id"], item["text"]) # Fallback to original
+            item["run_object"].text = modified_text
 
-    translated_text_response = response.text()
-    click.echo("Received translation from LLM.")
-
-    id_to_translation = {}
-    for line in translated_text_response.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            parts = line.split(":", 1)
-            if len(parts) == 2:
-                text_id = parts[0].strip()
-                translation = parts[1].strip()
-                id_to_translation[text_id] = translation
-            else:
-                click.echo(f"Warning: Could not parse translation line: {line}")
-        except Exception as e:
-            click.echo(f"Warning: Error parsing translation line '{line}': {e}")
-
-    click.echo("Replacing text with translations...")
-    for item in text_elements:
-        translated_text = id_to_translation.get(
-            item["id"], item["text"]
-        )  # Fallback to original
-        item["run_object"].text = translated_text
+    elif mode == "reverse-words":
+        click.echo("Applying word reversal...")
+        id_to_modified_text = {}
+        for item in text_elements:
+            reversed_text = reverse_individual_words(item['text'])
+            id_to_modified_text[item['id']] = reversed_text
+        
+        click.echo("Replacing text with reversed-word text...")
+        for item in text_elements:
+            modified_text = id_to_modified_text.get(item["id"], item["text"]) # Fallback to original
+            item["run_object"].text = modified_text
 
     new_prs.save(output_path)
-    click.echo(f"Translated presentation saved to: {output_path}")
+    click.echo(f"Presentation saved in '{mode}' mode to: {output_path}")
 
 
 if __name__ == "__main__":
