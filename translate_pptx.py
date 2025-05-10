@@ -220,11 +220,9 @@ def main(input_path, output_path):
 
     click.echo("Sending text to LLM for translation...")
     # Using a placeholder for filename, as from_text doesn't strictly need it.
-    attachment = llm.Attachment.from_text(
-        formatted_text, filename="texts_to_translate.txt"
-    )
     model = llm.get_model()  # Get default model
-    response = model.prompt(prompt, attachments=[attachment])
+    # Pass the formatted_text as a fragment
+    response = model.prompt(prompt, fragments=[formatted_text])
 
     translated_text_response = response.text()
     click.echo("Received translation from LLM.")
