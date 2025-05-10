@@ -77,10 +77,17 @@ unfixable = []
     "ANN204",  # Missing return type annotation for special method `__init__`
     "ANN401",  # Dynamically typed expressions (typing.Any) are disallowed
     "FBT001",  # Boolean-typed positional argument in function definition
+    "FBT002",  # Boolean default positional argument in function definition
     "INP001",  # File is part of an implicit namespace package. Add an `__init__.py`.
     "C408",  # Unnecessary `dict` call (rewrite as a literal)
+    "D103",  # Missing docstring in public function
     "D105",  # Missing docstring in magic method
     "D107",  # Missing docstring in `__init__`
+    "N803",  # Argument name should be lowercase
     "PLR0913",  # Too many arguments in function definition
+    "PLR0915",  # Too many statements
+    # Fixture without value is injected as parameter, use `@pytest.mark.usefixtures`
+    # instead
+    "PT019",
     "S101",  # Use of `assert` detected
 ]
