@@ -2,9 +2,11 @@
 
 Create a Python script which
 - reads a PowerPoint `.pptx` file
-- duplicates each page: `[p1, p2, p3]` becomes `[p1, p1copy, p2, p2copy, p3, p3copy]`
-- translates all text elements on each `p?copy` page from Finnish to English, preserving run-level formatting (in `translate` mode)
-- saves the presentation as a new `.pptx` file with a different name
+- first copies the input presentation to the output path using `shutil.copy2`.
+- then, for the primary modes (`translate`, `reverse-words`), it duplicates each original slide from this copied presentation and appends these duplicates to the end.
+- translates all text elements on these appended, duplicated (`p?copy`) pages from Finnish to English, preserving run-level formatting (in `translate` mode).
+- saves the modified presentation back to the `output_path`.
+- The final slide order will be: `[Original_Slide_1, ..., Original_Slide_N, Modified_Copy_of_Slide_1, ..., Modified_Copy_of_Slide_N]`.
 
 # Key Design Decisions & Clarifications
 
@@ -15,16 +17,16 @@ Based on review and discussion, the following clarifications and design choices 
 3.  **Scope of Modifiable Text:** The script will focus on text found within standard shapes (text boxes) and tables on the slides. Other text elements (e.g., chart labels, SmartArt, slide notes) are out of scope.
 4.  **Language Model (for `translate` mode):** The script will use the default language model accessible via Simon Willison's `llm` library (`llm.get_model()`). No specific model or advanced configuration will be hardcoded for the `translate` mode.
 5.  **Segmented Translation (for `translate` mode):** Text is extracted from individual runs. These (potentially short) text segments will be sent to the LLM with unique IDs. This approach is accepted, prioritizing formatting preservation over providing broader paragraph-level context to the LLM for each individual translation request. The LLM will still receive all text segments from the presentation in one batch.
-6.  **Slide Copying:** The method for duplicating slides will follow the principles outlined in the Stack Overflow solution (https://stackoverflow.com/a/73954830/15770), which aims to preserve slide layouts and masters when copying to a new presentation object.
+6.  **Slide Copying Strategy:** The script first performs a full file copy of the input presentation to the output path using `shutil.copy2`. Slide duplication then occurs *within this copied presentation*. A helper function (`_duplicate_slide_to_end`) is used to create a new slide (appended to the end of the presentation) based on the original slide's layout, and then deepcopies shapes from the original slide to the new duplicate. This happens in the context of the same presentation file, which is the copy of the original.
 
 ## New: Dry-Run Modes
 
 To facilitate debugging and testing without incurring LLM costs or delays, two dry-run modes will be implemented:
 
 1.  **`duplicate-only` Mode:**
-    *   The script will perform the initial slide duplication (creating two copies of each original slide).
-    *   All subsequent text extraction, LLM interaction, and text modification steps will be skipped.
-    *   The output presentation will contain two identical, untranslated copies of each original slide.
+    *   The script will first copy the input file to the output path. Then, it will duplicate each original slide from this copied presentation *once*, appending these duplicates to the end.
+    *   All text extraction, LLM interaction, and text modification steps on these duplicates will be skipped.
+    *   The output presentation will contain the original slides followed by their identical, untranslated duplicates (e.g., `[P1, P2, ..., Pn, P1_dup, P2_dup, ..., Pn_dup]`).
 2.  **`reverse-words` Mode:**
     *   The script will duplicate slides as usual.
     *   Text will be extracted from the second copy of each slide.
@@ -38,40 +40,41 @@ These modes will be selectable via a new command-line option (`--mode`).
 ```mermaid
 graph TD
     A[Start] --> B(Parse CLI Args: input_file, output_file, mode);
-    B --> C{Open input_file with python-pptx};
-    C --> D[Create new_prs Presentation object];
-    D --> E{Iterate prs.slides};
-    E -- For each slide --> F[Copy original slide to new_prs (1st copy)];
-    F --> G[Copy original slide again to new_prs (2nd copy - for modification)];
-    G --> E;
-    E -- All slides processed --> H{What is the --mode?};
+    B --> B1[Copy input_file to output_file via shutil.copy2];
+    B1 --> C{Open output_file (the copy) as prs};
+    C --> E{Iterate original_slides in prs (up to num_original_slides)};
+    E -- For each original_slide --> F[Duplicate original_slide, append to end of prs as duplicated_slide];
+    F --> E;
+    E -- All original slides processed --> H{What is the --mode?};
 
-    H -- Mode: 'translate' --> I[Extract Text from 2nd Copies];
-        I --> J[Format Text & Send to LLM];
-        J --> K[Parse LLM's Translated Text];
-        K --> L[Replace Text in 2nd Copies with Translations];
-        L --> Z[Save new_prs to output_file];
+    H -- Mode: 'translate' --> I[Collect 'duplicated_slide' instances];
+        I --> J[Extract Text from these duplicated_slides];
+        J --> K[Format Text & Send to LLM];
+        K --> L[Parse LLM's Translated Text];
+        L --> M[Replace Text in duplicated_slides with Translations];
+        M --> Z[Save prs to output_file];
 
-    H -- Mode: 'reverse-words' --> N[Extract Text from 2nd Copies];
-        N --> O[Define/Use local reverse_individual_words function];
-        O --> P[Apply reverse_individual_words to Each Text Element];
-        P --> Q[Replace Text in 2nd Copies with Reversed-Word Text];
-        Q --> Z;
-
-    H -- Mode: 'duplicate-only' --> R[Skip Text Processing];
+    H -- Mode: 'reverse-words' --> N[Collect 'duplicated_slide' instances];
+        N --> O[Extract Text from these duplicated_slides];
+        O --> P[Define/Use local reverse_individual_words function];
+        P --> Q[Apply reverse_individual_words to Each Text Element];
+        Q --> R[Replace Text in duplicated_slides with Reversed-Word Text];
         R --> Z;
+
+    H -- Mode: 'duplicate-only' --> S[Skip Text Processing];
+        S --> Z;
 
     Z --> W[End];
 
-    subgraph TextExtractionAndID [Step 4a: Extract Text and Map IDs (for translate/reverse-words)]
+    subgraph TextExtractionAndID [Step 4a: Extract Text and Map IDs (for translate/reverse-words from duplicated_slides)]
         direction LR
         ExtractRunText["Extract run.text, assign ID, store run object reference"]
     end
 
-    subgraph TextReplacement [Conditional Text Replacement]
+    subgraph TextReplacement [Conditional Text Replacement on duplicated_slides]
         direction LR
-        L_Replace["Update run.text = translated_text (translate mode)"]
-        Q_Replace["Update run.text = reversed_word_text (reverse-words mode)"]
+        M_Replace["Update run.text = translated_text (translate mode)"]
+        R_Replace["Update run.text = reversed_word_text (reverse-words mode)"]
     end
 ```
 
@@ -84,17 +87,21 @@ The script should perform the following steps:
     *   Define arguments for the input `.pptx` file path (required, `type=click.Path(exists=True, dir_okay=False)`) and the output `.pptx` file path (required, `type=click.Path(dir_okay=False)`).
     *   Add a `--mode` option using `click.option('--mode', type=click.Choice(['translate', 'duplicate-only', 'reverse-words'], case_sensitive=False), default='translate', show_default=True, help='Operation mode for the script.')`.
 
-2.  **Open Presentation:**
+2.  **Copy Input File:**
+    *   Before opening any presentation, copy the `input_path` to `output_path` using `shutil.copy2`. All subsequent operations will be on this copied file.
+    *   Handle potential errors during file copy (e.g., print an error message and exit).
+3.  **Open Copied Presentation:**
     *   Import the `Presentation` class from `pptx`.
-    *   Load the input presentation using `prs = Presentation(input_path)`.
-3.  **Iterate and Duplicate Slides:**
-    *   Create a new presentation object to build the modified presentation: `new_prs = Presentation()`.
-    *   Iterate through the slides of the original presentation: `for i, slide in enumerate(prs.slides):`.
-    *   For each original slide, copy and append it to the `new_prs` **twice**. The first copy remains as is; the second copy is designated for modification based on the selected mode. Use a robust slide copying function (e.g., adapted from the SO link or the existing `copy_slide` in the script).
+    *   Load the *copied* presentation using `prs = Presentation(output_path)`.
+4.  **Iterate and Duplicate Slides (in the copied presentation `prs`):**
+    *   The script operates on the presentation `prs` (loaded from `output_path`).
+    *   Determine the number of original slides: `num_original_slides = len(prs.slides)`.
+    *   Iterate based on the initial count of slides: `for i in range(num_original_slides): original_slide = prs.slides[i]`.
+    *   For each `original_slide`, duplicate it using the `_duplicate_slide_to_end(prs, original_slide)` helper function. This function appends the new (duplicated) slide to the end of `prs`. This duplicated slide is designated for modification.
 
-4.  **Conditional Processing Based on Mode:**
+5.  **Conditional Processing Based on Mode:**
 
-    *   A list `slides_for_text_extraction` should be populated with references to the second copies of slides if the mode is `translate` or `reverse-words`.
+    *   A list `slides_for_text_extraction` should be populated with references to these newly appended duplicated slides if the mode is `translate` or `reverse-words`.
 
     *   **If `mode == 'duplicate-only'`:**
         *   Proceed directly to Step 9 (Save Presentation). No text extraction or modification is performed on the duplicated slides.
@@ -159,7 +166,7 @@ The script should perform the following steps:
             *   Update the text of the run object directly: `element['run_object'].text = modified_text`.
 
 9.  **Save Presentation:**
-    *   Save the modified presentation: `new_prs.save(output_path)`.
+    *   Save the modified presentation: `prs.save(output_path)`.
     *   Print a confirmation message indicating the mode used and the output file path (e.g., `click.echo(f"Presentation saved in '{mode}' mode to: {output_path}")`).
 10. **Error Handling:**
     *   As per design decision, no explicit error handling blocks (try-except) will be implemented for issues beyond basic parsing of LLM response. Script errors will result in a crash with a traceback.
