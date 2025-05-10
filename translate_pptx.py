@@ -9,6 +9,7 @@ from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.util import Inches, Pt
 
+EOL_MARKER = "<"
 # import xml.etree.ElementTree as ET # Not strictly needed if using copy.deepcopy for lxml
 
 
@@ -61,11 +62,23 @@ def _duplicate_slide_to_end(pres, source_slide):
     return new_slide
 
 
-def reverse_individual_words(text_string):
-    """Reverses each word in a space-separated string."""
-    words = text_string.split(" ")
+def reverse_individual_words(text_string_with_eol):
+    """
+    Reverses each word in a space-separated string, preserving an EOL_MARKER if present.
+    """
+    text_to_reverse = text_string_with_eol
+    had_eol = False
+    if text_string_with_eol.endswith(EOL_MARKER):
+        text_to_reverse = text_string_with_eol[: -len(EOL_MARKER)]
+        had_eol = True
+
+    words = text_to_reverse.split(" ")
     reversed_words = [word[::-1] for word in words]
-    return " ".join(reversed_words)
+    result = " ".join(reversed_words)
+
+    if had_eol:
+        return result + EOL_MARKER
+    return result
 
 
 @click.command()
@@ -156,11 +169,12 @@ def main(input_path, output_path, mode):
                     if shape.has_text_frame:
                         for paragraph in shape.text_frame.paragraphs:
                             for run in paragraph.runs:
-                                original_text = run.text.strip()
-                                if original_text:
+                                original_text = run.text  # No strip. This is the canonical version for cache key and internal "text" storage.
+                                if original_text:  # Check unstripped text
                                     text_id = f"text_{text_id_counter}"
                                     text_id_counter += 1
 
+                                    # Cache uses original_text (no EOL) as key
                                     if original_text in translation_cache:
                                         click.echo(
                                             f"  Cache hit for ID {text_id}: '{original_text[:30].replace(chr(10), ' ').replace(chr(13), ' ')}...'"
@@ -168,27 +182,32 @@ def main(input_path, output_path, mode):
                                         all_text_elements_with_status.append(
                                             {
                                                 "id": text_id,
-                                                "text": original_text,
+                                                "text": original_text,  # Store raw original_text
                                                 "run_object": run,
                                                 "translation": translation_cache[
                                                     original_text
-                                                ],
+                                                ],  # Translation from cache is EOL-stripped
                                                 "from_cache": True,
                                             }
                                         )
-                                    else:
+                                    else:  # Cache miss
                                         click.echo(
                                             f"  Cache miss for ID {text_id}: '{original_text[:30].replace(chr(10), ' ').replace(chr(13), ' ')}...' (will send to LLM)"
                                         )
+                                        text_to_send_to_llm = original_text + EOL_MARKER
                                         texts_for_llm_prompt.append(
-                                            {"id": text_id, "text": original_text}
+                                            {
+                                                "id": text_id,
+                                                "original_text_for_cache": original_text,  # Key for cache update later
+                                                "text_to_send": text_to_send_to_llm,  # Actual text for LLM
+                                            }
                                         )
                                         all_text_elements_with_status.append(
                                             {
                                                 "id": text_id,
-                                                "text": original_text,
+                                                "text": original_text,  # Store raw original_text
                                                 "run_object": run,
-                                                "translation": None,
+                                                "translation": None,  # Will be filled (EOL-stripped)
                                                 "from_cache": False,
                                             }
                                         )
@@ -197,10 +216,13 @@ def main(input_path, output_path, mode):
                             for cell in row.cells:
                                 for paragraph in cell.text_frame.paragraphs:
                                     for run in paragraph.runs:
-                                        original_text = run.text.strip()
+                                        original_text = (
+                                            run.text
+                                        )  # No strip. Canonical for cache key.
                                         if original_text:
                                             text_id = f"text_{text_id_counter}"
                                             text_id_counter += 1
+                                            # Cache uses original_text (no EOL) as key
                                             if original_text in translation_cache:
                                                 click.echo(
                                                     f"  Cache hit for ID {text_id} (table): '{original_text[:30].replace(chr(10), ' ').replace(chr(13), ' ')}...'"
@@ -208,30 +230,34 @@ def main(input_path, output_path, mode):
                                                 all_text_elements_with_status.append(
                                                     {
                                                         "id": text_id,
-                                                        "text": original_text,
+                                                        "text": original_text,  # Store raw original_text
                                                         "run_object": run,
                                                         "translation": translation_cache[
                                                             original_text
-                                                        ],
+                                                        ],  # EOL-stripped from cache
                                                         "from_cache": True,
                                                     }
                                                 )
-                                            else:
+                                            else:  # Cache miss
                                                 click.echo(
                                                     f"  Cache miss for ID {text_id} (table): '{original_text[:30].replace(chr(10), ' ').replace(chr(13), ' ')}...' (will send to LLM)"
+                                                )
+                                                text_to_send_to_llm = (
+                                                    original_text + EOL_MARKER
                                                 )
                                                 texts_for_llm_prompt.append(
                                                     {
                                                         "id": text_id,
-                                                        "text": original_text,
+                                                        "original_text_for_cache": original_text,  # Key for cache update
+                                                        "text_to_send": text_to_send_to_llm,  # Actual text for LLM
                                                     }
                                                 )
                                                 all_text_elements_with_status.append(
                                                     {
                                                         "id": text_id,
-                                                        "text": original_text,
+                                                        "text": original_text,  # Store raw original_text
                                                         "run_object": run,
-                                                        "translation": None,
+                                                        "translation": None,  # Will be EOL-stripped
                                                         "from_cache": False,
                                                     }
                                                 )
@@ -261,20 +287,28 @@ def main(input_path, output_path, mode):
                 f"Sending {len(texts_for_llm_prompt)} text elements to LLM for translation."
             )
             formatted_text_for_llm = "\n".join(
-                [f"{item['id']}: {item['text']}" for item in texts_for_llm_prompt]
+                [
+                    f"{item['id']}: {item['text_to_send']}"
+                    for item in texts_for_llm_prompt
+                ]  # Use text_to_send
             )
             prompt_text = (
                 "You are an expert Finnish to English translator. "
                 "Translate the following text segments accurately from Finnish to English. "
                 "Each segment is prefixed with a unique ID (e.g., text_0, text_1). "
+                "The text for each ID might end with an EOL marker: '<'. "  # Added EOL marker info
                 "Your response MUST consist ONLY of the translated segments, each prefixed with its original ID, "
-                "and each on a new line. Maintain the exact ID and format.\n"
+                "and each on a new line. Maintain the exact ID and format. "
+                "PRESERVE ALL LEADING AND TRAILING WHITESPACE from the original segment in your translation. "  # Added whitespace preservation
+                "If an EOL marker '<' was present at the end of the input segment, IT MUST be present at the end of your translated segment, including any whitespace before it.\n"  # Added EOL marker preservation
                 "For example, if you receive:\n"
-                "text_0: Hei maailma\n"
-                "text_1: Kiitos paljon\n"
+                "text_0: Hei maailma<\n"
+                "text_1:    Paljon kiitoksia   <\n"
+                "text_2: Vain tekstiä\n"
                 "You MUST return:\n"
-                "text_0: Hello world\n"
-                "text_1: Thank you very much\n\n"
+                "text_0: Hello world<\n"
+                "text_1:    Thank you very much   <\n"
+                "text_2: Just text\n\n"
                 "Do not add any extra explanations, apologies, or introductory/concluding remarks. "
                 "Only provide the ID followed by the translated text for each item.\n\n"
                 "Texts to translate:\n"
@@ -298,38 +332,55 @@ def main(input_path, output_path, mode):
             click.echo("Received translation from LLM.")
 
             for line in translated_text_response.splitlines():
-                line = line.strip()
+                line = (
+                    line.strip()
+                )  # Strip the whole line to check if it's empty or just whitespace
                 if not line:
                     continue
                 try:
                     parts = line.split(":", 1)
                     if len(parts) == 2:
-                        parsed_text_id, llm_translation = (
-                            parts[0].strip(),
-                            parts[1].strip(),
-                        )
-                        original_text_for_cache_key = next(
+                        parsed_text_id = parts[0].strip()
+                        # DO NOT strip llm_translation here, preserve spaces from LLM
+                        llm_translation_with_eol = parts[1]
+
+                        # Find the corresponding original_text_for_cache from texts_for_llm_prompt
+                        # This original_text_for_cache is what we use as the key in translation_cache
+                        prompt_item_data = next(
                             (
-                                item["text"]
+                                item
                                 for item in texts_for_llm_prompt
                                 if item["id"] == parsed_text_id
                             ),
                             None,
                         )
-                        if original_text_for_cache_key:
+
+                        if prompt_item_data:
+                            original_text_for_cache_key = prompt_item_data[
+                                "original_text_for_cache"
+                            ]
+
+                            # Strip EOL_MARKER from the translation before caching and storing
+                            final_llm_translation = llm_translation_with_eol
+                            if final_llm_translation.endswith(EOL_MARKER):
+                                final_llm_translation = final_llm_translation[
+                                    : -len(EOL_MARKER)
+                                ]
+
                             translation_cache[original_text_for_cache_key] = (
-                                llm_translation
+                                final_llm_translation
                             )
+
                             for elem in all_text_elements_with_status:
                                 if elem["id"] == parsed_text_id:
-                                    elem["translation"] = llm_translation
-                                    elem["from_cache"] = (
-                                        False  # Mark as freshly translated
+                                    elem["translation"] = (
+                                        final_llm_translation  # Store EOL-stripped
                                     )
+                                    elem["from_cache"] = False
                                     break
                         else:
                             click.echo(
-                                f"Warning: Could not find original text for ID {parsed_text_id} from LLM response to update cache/status list.",
+                                f"Warning: Could not find original_text_for_cache for ID {parsed_text_id} from LLM response to update cache/status list.",
                                 err=True,
                             )
                     else:
@@ -363,15 +414,16 @@ def main(input_path, output_path, mode):
                     if shape.has_text_frame:
                         for paragraph in shape.text_frame.paragraphs:
                             for run in paragraph.runs:
-                                original_text = run.text.strip()
+                                original_text = run.text  # No strip
                                 if original_text:
+                                    text_with_eol = original_text + EOL_MARKER
                                     text_id = (
                                         f"text_{text_id_counter}"  # Uses global counter
                                     )
                                     text_elements_for_reverse.append(
                                         {
                                             "id": text_id,
-                                            "text": original_text,
+                                            "text": text_with_eol,  # Store with EOL
                                             "run_object": run,
                                         }
                                     )
@@ -381,13 +433,14 @@ def main(input_path, output_path, mode):
                             for cell in row.cells:
                                 for paragraph in cell.text_frame.paragraphs:
                                     for run in paragraph.runs:
-                                        original_text = run.text.strip()
+                                        original_text = run.text  # No strip
                                         if original_text:
+                                            text_with_eol = original_text + EOL_MARKER
                                             text_id = f"text_{text_id_counter}"  # Uses global counter
                                             text_elements_for_reverse.append(
                                                 {
                                                     "id": text_id,
-                                                    "text": original_text,
+                                                    "text": text_with_eol,  # Store with EOL
                                                     "run_object": run,
                                                 }
                                             )
@@ -408,8 +461,11 @@ def main(input_path, output_path, mode):
         )
         click.echo("Applying word reversal on duplicated slides...")
         for item in text_elements_for_reverse:
-            reversed_text = reverse_individual_words(item["text"])
-            item["run_object"].text = reversed_text
+            reversed_text_with_eol = reverse_individual_words(item["text"])
+            final_reversed_text = reversed_text_with_eol
+            if final_reversed_text.endswith(EOL_MARKER):
+                final_reversed_text = final_reversed_text[: -len(EOL_MARKER)]
+            item["run_object"].text = final_reversed_text
         click.echo("Text replaced with reversed-word text on duplicated slides.")
 
     prs.save(output_path)
