@@ -1,4 +1,5 @@
 import copy  # For deepcopying elements
+import shutil  # For file copying
 
 import click
 import llm  # Simon Willison's LLM library
@@ -9,114 +10,54 @@ from pptx.util import Inches, Pt
 # import xml.etree.ElementTree as ET # Not strictly needed if using copy.deepcopy for lxml
 
 
-# --- Slide Copying Logic (Adapted from https://stackoverflow.com/a/73954830/15770) ---
-def _get_blank_slide_layout(pres):
-    """Return a blank slide layout from pres"""
-    layout_items = [layout for layout in pres.slide_layouts if layout.name == "Blank"]
-    if not layout_items:
-        # Fallback if "Blank" layout is not found by name (e.g. different language versions)
-        # In many default templates, layout index 5 or 6 is often Blank.
-        # This is a heuristic and might need adjustment for specific templates.
-        if len(pres.slide_layouts) > 5:
-            return pres.slide_layouts[5]  # Common index for Blank
-        else:  # If very few layouts, pick the last one as a desperate fallback
-            return pres.slide_layouts[-1]
-    return layout_items[0]
-
-
-def copy_slide(src_presentation, new_presentation, slide_to_copy_index):
+def _duplicate_slide_to_end(pres, source_slide):
     """
-    Copies a slide from src_presentation to new_presentation.
-    Adapted from https://stackoverflow.com/a/73954830/15770 user "shredactivate"
-    This version is simplified as it copies to a new presentation object `new_presentation`
-    which might not have all source masters. The SO answer is more robust for
-    copying between arbitrary existing files.
+    Duplicates the source_slide and appends the copy to the end of the presentation.
+    Returns the newly created (duplicated) slide.
     """
-    src_slide = src_presentation.slides[slide_to_copy_index]
+    # Use the source slide's layout directly, as we are in the same presentation context
+    target_layout = source_slide.slide_layout
+    new_slide = pres.slides.add_slide(target_layout)  # Adds to the end
 
-    # Create a new slide in the target presentation.
-    # Attempt to use the same layout as the source slide.
-    # If the named layout doesn't exist in new_presentation's master, this will fail or use a default.
-    # A truly robust solution involves copying slide masters and layouts first.
-    # For this script, we assume new_presentation starts blank and we add to it.
-    # python-pptx creates a default master when Presentation() is called.
-
-    # Try to find layout by name (less reliable across different base templates)
-    # Fallback to using the source slide's layout object directly if it's from the same master pool,
-    # or a default blank layout.
-    target_layout = None
-    if new_presentation.slide_masters:  # Check if new_prs has any masters
-        try:
-            # This assumes new_presentation has been prepared with necessary layouts
-            # or that default layouts are sufficient.
-            target_layout = new_presentation.slide_layouts.get_by_name(
-                src_slide.slide_layout.name
-            )
-        except KeyError:  # get_by_name raises KeyError if not found
-            pass  # target_layout remains None
-
-    if target_layout is None:
-        # If specific layout not found, or new_presentation has no masters yet (should not happen with Presentation())
-        # fall back to a blank layout from new_presentation.
-        # If new_presentation is truly empty (e.g. no default master), this would also need care.
-        # However, Presentation() initializes with a default master & layouts.
-        target_layout = _get_blank_slide_layout(new_presentation)
-
-    new_slide = new_presentation.slides.add_slide(target_layout)
-
-    # Copy shapes from source slide to new slide
-    for shape in src_slide.shapes:
+    # Copy shapes
+    for shape in source_slide.shapes:
         el = shape.element
-        # new_el = ET.fromstring(ET.tostring(el)) # Deep copy using standard library XML
-        new_el = copy.deepcopy(
-            el
-        )  # Deep copy using lxml's capabilities via python-pptx's element objects
+        new_el = copy.deepcopy(el)
         new_slide.shapes._spTree.insert_element_before(new_el, "p:extLst")
-        # Note: This low-level shape copy is effective for many shape types including text boxes.
-        # However, for shapes with complex relationships (e.g., linked charts, embedded media not stored directly in shape XML),
-        # their `rId`s (relationship IDs) would need to be managed by copying the related parts
+        # Note: This low-level shape copy is effective for many shape types.
+        # However, for shapes with complex relationships (e.g., linked charts,
+        # embedded media not stored directly in shape XML), their `rId`s
+        # (relationship IDs) would need to be managed by copying the related parts
         # from the source presentation package to the target and updating these rIds.
-        # The referenced StackOverflow answer provides a much more comprehensive solution for this.
-        # This script prioritizes text translation and assumes simpler content or that visual fidelity
-        # issues from missing linked parts are acceptable for its primary goal.
+        # Since we are copying the entire file first, these relationships should be intact
+        # for the original slides, and deepcopy should handle most shape-internal data.
 
     # Copy background (simplified)
     # A full background copy would also consider slide master and layout backgrounds.
-    print(
-        f"DEBUG: Slide {slide_to_copy_index + 1} background fill object: {src_slide.background.fill}"
-    )
-    print(
-        f"DEBUG: Slide {slide_to_copy_index + 1} background fill type: {src_slide.background.fill.type}"
-    )
-    if src_slide.background.fill.type:  # Check if there's a fill type set
+    # However, since we are duplicating within the same presentation,
+    # the new slide should inherit correctly from its layout/master.
+    # This explicit copy might still be useful for direct slide-level background overrides.
+    if source_slide.background.fill.type:  # Check if there's a fill type set
         new_slide.background.fill.solid()  # Ensure fill is solid before setting color
-        # This is a very basic color copy. More complex fills (gradient, picture) are not fully handled here.
         try:
-            # Attempt to get the source foreground color's RGB value
-            # This line might raise TypeError if fore_color is not directly available (e.g., _NoFill, or inherited)
-            # or AttributeError if .rgb is not present.
-            src_rgb = src_slide.background.fill.fore_color.rgb
-            # If successful, apply it to the new slide's foreground color
+            src_rgb = source_slide.background.fill.fore_color.rgb
             new_slide.background.fill.fore_color.rgb = src_rgb
-        except TypeError:
-            # This typically occurs if src_slide.background.fill.fore_color itself raises
-            # the "fill type ... has no foreground color" error.
-            print(
-                f"DEBUG: Slide {slide_to_copy_index + 1} - TypeError: No direct foreground color to copy or not an RGBColor object."
-            )
-        except AttributeError:
-            # This could occur if fore_color exists but is None, or doesn't have an .rgb attribute.
-            print(
-                f"DEBUG: Slide {slide_to_copy_index + 1} - AttributeError: Foreground color attribute missing or not an RGBColor object."
-            )
-            # elif hasattr(src_slide.background.fill.fore_color, 'theme_color'):
-            #     new_slide.background.fill.fore_color.theme_color = src_slide.background.fill.fore_color.theme_color
+        except (TypeError, AttributeError):
+            # This can happen if the fill isn't a simple solid color or color is inherited.
+            # Silently pass for now, as layout inheritance should handle most cases.
+            # click.echo(f"DEBUG: Could not copy direct background color for duplicated slide from slide {pres.slides.index(source_slide) + 1}")
+            pass
 
-    # Notes slide copying is omitted for simplicity as per PLAN.md scope.
+    # Notes slide copying (omitted for simplicity as per PLAN.md scope)
+    # if source_slide.has_notes_slide:
+    #     ts = source_slide.notes_slide
+    #     new_notes_slide = new_slide.notes_slide
+    #     # This part needs careful implementation if notes are complex
+    #     if ts.notes_text_frame:
+    #          new_notes_slide.notes_text_frame.text = ts.notes_text_frame.text
+
+
     return new_slide
-
-
-# --- End Slide Copying Logic ---
 
 
 def reverse_individual_words(text_string):
@@ -132,51 +73,64 @@ def reverse_individual_words(text_string):
 @click.argument("output_path", type=click.Path(dir_okay=False))
 def main(input_path, output_path, mode):
     """
-    Processes a PowerPoint presentation by duplicating slides and optionally modifying text.
+    Processes a PowerPoint presentation.
+    In 'translate', 'reverse-words', and 'duplicate-only' modes, it first copies the input
+    presentation to the output path. Then, it duplicates each original slide and appends
+    the copy to the end of the presentation. For 'translate' and 'reverse-words' modes,
+    text on these duplicated slides is then modified.
 
-    Modes:
-    - translate: Duplicates each slide and translates text on the copy from Finnish to English.
-    - duplicate-only: Duplicates each slide without any text modification.
-    - reverse-words: Duplicates each slide and reverses each word on the copy.
+    Output slide order: Original_Slide_1, ..., Original_Slide_N, Modified_Slide_1, ..., Modified_Slide_N
     """
-    click.echo(f"Loading presentation from: {input_path}")
-    prs = Presentation(input_path)
-    new_prs = Presentation()  # Create a new presentation for the output
+    click.echo(f"Copying '{input_path}' to '{output_path}' to preserve layout...")
+    try:
+        shutil.copy2(input_path, output_path)
+    except Exception as e:
+        click.echo(f"Error copying file: {e}", err=True)
+        return
+    click.echo("File copy complete.")
 
-    # Make sure new_prs has the same slide masters and layouts as prs
-    # This is a simplified approach; a full copy would involve iterating masters.
-    # For now, we rely on the copy_slide function to use existing or default layouts.
-    # To be more robust, one would copy slide masters from prs to new_prs first.
-    # Example: (Conceptual, python-pptx doesn't directly support master copy)
-    # for master in prs.slide_masters:
-    #     # logic to copy master to new_prs
+    click.echo(f"Loading presentation for modification from: {output_path}")
+    prs = Presentation(output_path) # Open the copied file
 
-    text_elements = []
-    text_id_counter = 0
+    num_original_slides = len(prs.slides)
+    if num_original_slides == 0:
+        click.echo("Input presentation has no slides. Exiting.")
+        # prs.save(output_path) # Save the (empty) copy
+        return
 
-    slides_for_text_extraction = []
+    slides_for_text_extraction = [] # Will hold the duplicated slides for modification
 
-    click.echo("Processing slides...")
-    for i, slide in enumerate(prs.slides):
-        click.echo(f"  Copying original slide {i + 1}...")
-        copy_slide(prs, new_prs, i)  # Copy original slide (first copy)
-
-        click.echo(f"  Copying slide {i + 1} for modification (second copy)...")
-        modified_slide_candidate = copy_slide(
-            prs, new_prs, i
-        )  # Copy slide again for modification
+    click.echo(f"Duplicating {num_original_slides} original slide(s) to the end of the presentation...")
+    for i in range(num_original_slides):
+        original_slide = prs.slides[i] # This is a slide from the *copied* presentation
+        click.echo(f"  Duplicating original slide {i + 1} ('{original_slide.slide_layout.name}')...")
+        
+        # Duplicate the slide and append it to the end
+        duplicated_slide = _duplicate_slide_to_end(prs, original_slide)
+        
         if mode == "translate" or mode == "reverse-words":
-            slides_for_text_extraction.append(modified_slide_candidate)
+            slides_for_text_extraction.append(duplicated_slide)
+        elif mode == "duplicate-only":
+            # For duplicate-only, we still add it to this list,
+            # but it won't be processed for text.
+            # This keeps the logic consistent for reporting.
+            slides_for_text_extraction.append(duplicated_slide) 
+            
+        click.echo(f"    Slide {i + 1} duplicated. Total slides now: {len(prs.slides)}")
 
     if mode == "duplicate-only":
-        click.echo("Mode 'duplicate-only': Skipping text processing.")
-        new_prs.save(output_path)
+        click.echo("Mode 'duplicate-only': Text processing skipped. All slides (originals and their duplicates) are saved.")
+        prs.save(output_path)
         click.echo(f"Presentation saved in '{mode}' mode to: {output_path}")
         return
 
     # Text processing for 'translate' and 'reverse-words' modes
+    # This operates on the slides in 'slides_for_text_extraction'
+    text_elements = []
+    text_id_counter = 0
+
     if slides_for_text_extraction:
-        click.echo(f"Extracting text from duplicated slides for mode '{mode}'...")
+        click.echo(f"Extracting text from {len(slides_for_text_extraction)} duplicated slides for mode '{mode}'...")
         for slide_to_extract in slides_for_text_extraction:
             for shape in slide_to_extract.shapes:
                 if shape.has_text_frame:
@@ -211,8 +165,8 @@ def main(input_path, output_path, mode):
                                         text_id_counter += 1
     
     if not text_elements:
-        click.echo(f"No text found to process for mode '{mode}'.")
-        new_prs.save(output_path)
+        click.echo(f"No text found to process on duplicated slides for mode '{mode}'.")
+        prs.save(output_path)
         click.echo(f"Presentation saved without text modification in '{mode}' mode to: {output_path}")
         return
 
@@ -239,7 +193,7 @@ def main(input_path, output_path, mode):
             "Texts to translate:\n"
         )
         click.echo("Sending text to LLM for translation...")
-        model = llm.get_model()
+        model = llm.get_model() # Assumes llm is configured
         response = model.prompt(prompt, fragments=[formatted_text])
         translated_text_response = response.text()
         click.echo("Received translation from LLM.")
@@ -260,24 +214,21 @@ def main(input_path, output_path, mode):
             except Exception as e:
                 click.echo(f"Warning: Error parsing translation line '{line}': {e}")
         
-        click.echo("Replacing text with translations...")
+        click.echo("Replacing text with translations on duplicated slides...")
         for item in text_elements:
             modified_text = id_to_modified_text.get(item["id"], item["text"]) # Fallback to original
             item["run_object"].text = modified_text
 
     elif mode == "reverse-words":
-        click.echo("Applying word reversal...")
-        id_to_modified_text = {}
+        click.echo("Applying word reversal on duplicated slides...")
+        id_to_modified_text = {} # Not strictly needed here but keeps structure similar
         for item in text_elements:
             reversed_text = reverse_individual_words(item['text'])
-            id_to_modified_text[item['id']] = reversed_text
+            item["run_object"].text = reversed_text # Apply directly
         
-        click.echo("Replacing text with reversed-word text...")
-        for item in text_elements:
-            modified_text = id_to_modified_text.get(item["id"], item["text"]) # Fallback to original
-            item["run_object"].text = modified_text
+        click.echo("Text replaced with reversed-word text on duplicated slides.")
 
-    new_prs.save(output_path)
+    prs.save(output_path)
     click.echo(f"Presentation saved in '{mode}' mode to: {output_path}")
 
 
