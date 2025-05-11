@@ -366,11 +366,10 @@ def main(input_path: str, output_path: str, mode: str, pages: str | None) -> Non
     slides_to_process_objects: list[PptxSlide] = []
     original_page_indices_for_processing: list[int] = []
 
-    if num_original_slides > 0:
-        for i, slide_obj in enumerate(prs.slides):
-            if i in selected_pages_0_indexed:
-                slides_to_process_objects.append(slide_obj)
-                original_page_indices_for_processing.append(i)
+    for i, slide_obj in enumerate(prs.slides):
+        if i in selected_pages_0_indexed:
+            slides_to_process_objects.append(slide_obj)
+            original_page_indices_for_processing.append(i)
 
     if not slides_to_process_objects:
         if pages:
