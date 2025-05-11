@@ -1,145 +1,69 @@
 """Page range parsing for presentation slides."""
 
+import re
+
 import click
+
+# Pre-compile regex for efficiency if this function is called multiple times.
+PAGE_PART_REGEX = re.compile(
+    # Matches: N-M (groups 1,2), N (group 3), or -M (group 4)
+    # \s* allows whitespace around numbers and hyphens.
+    # ^ and $ ensure the whole part matches the pattern.
+    r"^\s*(?:(\d+)\s*-\s*(\d*)|(\d+)|-\s*(\d+))\s*$"
+)
 
 
 def parse_page_range(range_str: str, total_slides: int) -> set[int]:
     """Parse a page range string (e.g., "1,3-5,8-") to a set of 0-indexed page numbers.
 
-    Validates against total_slides. Raises click.BadParameter on error.
+    Relies on standard Python exceptions for invalid formats or values.
     1-indexed page numbers are used in the input string.
     """
-    selected_pages_0_indexed = set()
+    selected_pages_0_indexed: set[int] = set()
 
-    if total_slides == 0:
-        # If a range_str was provided for a presentation with no slides, it's an issue.
-        # If range_str is None or empty, this function might not even be called,
-        # or it could return an empty set, which is fine.
-        if range_str:  # Check if user actually specified a range for an empty deck
-            msg = (
-                f"Cannot specify page range '{range_str}' for a presentation with "
-                "no slides."
-            )
-            raise click.BadParameter(msg)
-        return selected_pages_0_indexed  # Correctly returns empty set if no slides
+    if not range_str.strip():  # Handles empty or whitespace-only input.
+        return selected_pages_0_indexed
 
-    # If range_str is None (meaning --pages not used), this function shouldn't be called
-    # by main.
-    # The caller (main) should handle that by selecting all pages.
-    # If range_str is an empty string (e.g., --pages=""), it's an invalid input if
-    # --pages was explicitly used.
-    if (
-        range_str is not None and not range_str.strip()
-    ):  # Check if --pages was used and an empty string was passed
-        msg = (
-            "Page range string cannot be empty if --pages option is used with an "
-            "empty value."
-        )
-        raise click.BadParameter(msg)
-
-    parts = range_str.split(",")
-    for part_specifier in parts:
-        part = part_specifier.strip()
-        if not part:  # Handles cases like "1,,2" or leading/trailing commas
+    for part_raw in range_str.split(","):
+        part = part_raw.strip()
+        if not part:  # Skips empty parts like in "1,,2".
             continue
 
-        if "-" in part:
-            # Range specifier
-            elements = part.split("-", 1)
-            start_str, end_str = elements[0].strip(), elements[1].strip()
+        match = PAGE_PART_REGEX.match(part)
+        if not match:
+            msg = f"Invalid page range part format: '{part}'"
+            raise click.BadParameter(msg)
 
-            start_page_1_indexed = None
-            end_page_1_indexed = None
+        g = match.groups()
+        start_1_idx: int
+        end_1_idx: int
 
-            if start_str:  # "N-M" or "N-"
-                try:
-                    start_page_1_indexed = int(start_str)
-                    if start_page_1_indexed < 1:
-                        msg = (
-                            f"Page numbers must be positive. Found start "
-                            f"'{start_str}' in '{part_specifier}'."
-                        )
-                        raise click.BadParameter(msg)
-                except ValueError as exc:
-                    msg = (
-                        f"Invalid start page number '{start_str}' in "
-                        f"'{part_specifier}'. Must be an integer."
-                    )
-                    raise click.BadParameter(msg) from exc
-            else:  # "-M"
-                start_page_1_indexed = 1  # Default start for ranges like "-5"
+        if g[0] is not None:  # Matched "N-M" or "N-"
+            # g[0] is N (start of range)
+            # g[1] is M (end of range, empty for "N-")
+            start_1_idx = int(g[0])
+            end_1_idx = int(g[1]) if g[1] else total_slides
+        elif g[2] is not None:  # Matched "N" (single page)
+            # g[2] is N
+            start_1_idx = int(g[2])
+            end_1_idx = start_1_idx
+        elif g[3] is not None:  # Matched "-M"
+            # g[3] is M
+            start_1_idx = 1
+            end_1_idx = int(g[3])
+        # An 'else' case is not strictly needed due to the 'if not match' check.
+        # If regex logic were flawed, it might be hit, implying an unhandled pattern.
 
-            if end_str:  # "N-M" or "-M"
-                try:
-                    end_page_1_indexed = int(end_str)
-                    if end_page_1_indexed < 1:
-                        msg = (
-                            f"Page numbers must be positive. Found end '{end_str}' "
-                            f"in '{part_specifier}'."
-                        )
-                        raise click.BadParameter(msg)
-                except ValueError as exc:
-                    msg = (
-                        f"Invalid end page number '{end_str}' in '{part_specifier}'. "
-                        "Must be an integer."
-                    )
-                    raise click.BadParameter(msg) from exc
-            else:  # "N-"
-                end_page_1_indexed = total_slides  # Default end for ranges like "5-"
+        # Determine the actual loop bounds, clamped to valid 1-indexed pages.
+        # Pages < 1 are effectively treated as 1 for the start.
+        # Pages > total_slides are capped at total_slides for the end.
+        # If total_slides is 0, actual_loop_end will be <= 0.
+        loop_start_clamped = max(1, start_1_idx)
+        loop_end_clamped = min(total_slides, end_1_idx)
 
-            if start_page_1_indexed > end_page_1_indexed:
-                msg = (
-                    f"Start page {start_page_1_indexed} cannot be greater than end "
-                    f"page {end_page_1_indexed} in range '{part_specifier}'."
-                )
-                raise click.BadParameter(msg)
-
-            # Validate individual bounds against total_slides
-            if start_page_1_indexed > total_slides:
-                # This also covers cases where start_page_1_indexed was 1 (for "-M") but
-                # total_slides is 0 (already handled) or if user specifies "10-" for a
-                # 5-slide deck.
-                # No need to add to set if start is already beyond total slides.
-                click.echo(
-                    f"Warning: Start page {start_page_1_indexed} in range "
-                    f"'{part_specifier}' is beyond the total of {total_slides} "
-                    "slides. This part of the range will select no pages.",
-                    err=True,
-                )
-                continue  # Skip this part of the range
-
-            # For "N-M" or "-M", if end_page_1_indexed was explicitly given and exceeds
-            # total_slides
-            if end_str and end_page_1_indexed > total_slides:
-                click.echo(
-                    f"Warning: End page {end_page_1_indexed} in range "
-                    f"'{part_specifier}' is beyond the total of {total_slides} "
-                    f"slides. Range will be capped at {total_slides}.",
-                    err=True,
-                )
-                # end_page_1_indexed will be capped by min() below.
-
-            # Add pages (0-indexed) to the set
-            # Cap end_page_1_indexed at total_slides for ranges like "N-" or valid "N-M"
-            # This loop will correctly handle start_page_1_indexed up to
-            # min(end_page_1_indexed, total_slides)
-            for i in range(
-                start_page_1_indexed, min(end_page_1_indexed, total_slides) + 1
-            ):
-                selected_pages_0_indexed.add(i - 1)
-        else:
-            # Single page specifier
-            try:
-                page_num_1_indexed = int(part)
-                if not (1 <= page_num_1_indexed <= total_slides):
-                    msg = (
-                        f"Page number {page_num_1_indexed} in '{part_specifier}' is "
-                        f"out of valid range [1, {total_slides}]."
-                    )
-                    raise click.BadParameter(msg)
-                selected_pages_0_indexed.add(page_num_1_indexed - 1)
-            except ValueError as exc:
-                msg = f"Invalid page number: '{part_specifier}'. Must be an integer."
-                raise click.BadParameter(msg) from exc
+        # Add 0-indexed pages to the set.
+        # The loop `range(A, B+1)` is empty if A > B.
+        for i in range(loop_start_clamped, loop_end_clamped + 1):
+            selected_pages_0_indexed.add(i - 1)
 
     return selected_pages_0_indexed
