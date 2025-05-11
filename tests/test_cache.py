@@ -863,10 +863,17 @@ _H_EMPTY_COVERAGE = "hash_empty_for_coverage_commit"  # For 303->296 coverage
         initial_translation_cache={
             _H1_COMMIT: [{"original_text": "orig1", "translation": "trans1"}]
         },
-        pending_updates={_H1_COMMIT: []},  # Existing hash, now empty list
-        expected_final_cache_content={_H1_COMMIT: []},
+        pending_updates={
+            _H1_COMMIT: [],  # First item: Existing hash, empty list
+            _H2_COMMIT: [{"original_text": "orig2", "translation": "trans2"}] # Second item: New hash
+        },
+        expected_final_cache_content={
+            _H1_COMMIT: [], # Gets cleared
+            _H2_COMMIT: [{"original_text": "orig2", "translation": "trans2"}] # Gets added
+        },
         expected_echo_substrings=[
-            f"Cleared translations for existing page_hash: {_H1_COMMIT[:8]}"
+            f"Cleared translations for existing page_hash: {_H1_COMMIT[:8]}",
+            f"Updated cache for page_hash: {_H2_COMMIT[:8]}"
         ],
     ),
     dict(
@@ -907,7 +914,7 @@ _H_EMPTY_COVERAGE = "hash_empty_for_coverage_commit"  # For 303->296 coverage
     ids=[
         "add_new_and_update_existing_hash",
         "pending_has_empty_list_for_new_hash",
-        "pending_has_empty_list_for_existing_hash",
+        "pending_empty_list_for_existing_hash_then_item", # Updated ID
         "empty_pending_updates",
         "pending_updates_one_item_no_existing",
         "commit_one_new_hash_with_empty_list",  # Covers 303->296
