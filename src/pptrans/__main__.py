@@ -19,7 +19,7 @@ from pptrans.cache import (
 from pptrans.page_range import parse_page_range
 
 if TYPE_CHECKING:
-    from pptx.slide import Slide as PptxSlide
+    from pptx.slide import Slide as PptxSlide  # pragma: no cover
 
 EOL_MARKER = "<"
 
