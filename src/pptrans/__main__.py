@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import click
@@ -21,7 +22,13 @@ from pptrans.page_range import parse_page_range
 if TYPE_CHECKING:
     from pptx.slide import Slide as PptxSlide  # pragma: no cover
 
+
 EOL_MARKER = "<"
+
+
+def _emit_save_message(mode: str, output_path: Path) -> None:
+    """Emit the final save message to the console."""
+    click.echo(f"Presentation saved in '{mode}' mode to: {output_path}")
 
 
 def reverse_individual_words(text_string_with_eol: str) -> str:
@@ -420,7 +427,7 @@ def main(input_path: str, output_path: str, mode: str, pages: str | None) -> Non
         pass
 
     prs.save(output_path)
-    click.echo(f"Presentation saved in '{mode}' mode to: {output_path}")
+    _emit_save_message(mode, Path(output_path))
 
 
 if __name__ == "__main__":

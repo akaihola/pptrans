@@ -937,6 +937,26 @@ def test_process_reverse_words_mode_with_text(
     mock_echo.assert_any_call("Text replaced with reversed-word text on slides.")
 
 
+@patch("pptrans.__main__.click.echo")
+@pytest.mark.kwparametrize(
+    dict(mode="translate", output_path_str="output.pptx", id="translate_mode"),
+    dict(mode="reverse-words", output_path_str="reversed.pptx", id="reverse_mode"),
+)
+def test_emit_save_message(
+    mock_echo: MagicMock, mode: str, output_path_str: str
+) -> None:
+    """Test the _emit_save_message function."""
+    from pathlib import Path
+
+    from pptrans.__main__ import _emit_save_message
+
+    output_path = Path(output_path_str)
+    _emit_save_message(mode, output_path)
+    mock_echo.assert_called_once_with(
+        f"Presentation saved in '{mode}' mode to: {output_path}"
+    )
+
+
 @patch("pptrans.__main__.shutil.copy2")
 @patch("pptrans.__main__.Presentation")
 @patch("pptrans.__main__._handle_slide_selection")
