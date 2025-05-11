@@ -866,6 +866,36 @@ def test_process_translation_mode_with_llm_call(
 
 
 @patch("pptrans.__main__.click.echo")
+def test_process_reverse_words_mode_no_slides_to_process(mock_echo: MagicMock) -> None:
+    """Test _process_reverse_words_mode when slides_to_process is empty."""
+    result = _process_reverse_words_mode(
+        slides_to_process=[],
+        original_page_indices=[],
+        eol_marker=EOL_MARKER,
+        text_id_counter_start=10,
+    )
+    assert result == 10  # Should return the initial counter
+
+    # Check that the "No text found" message is printed
+    mock_echo.assert_any_call(
+        "No text found to process on selected slides for mode 'reverse-words'."
+    )
+
+    # Check that the "Extracting text..." message (from within the if block)
+    # was NOT printed, confirming the if block was skipped.
+    extracting_message_found = False
+    for call_args_tuple in mock_echo.call_args_list:
+        args, _kwargs = call_args_tuple
+        if args and "Extracting text from" in args[0]:
+            extracting_message_found = True
+            break
+    assert not extracting_message_found, (
+        "The 'Extracting text...' message should not be printed "
+        "when slides_to_process is empty."
+    )
+
+
+@patch("pptrans.__main__.click.echo")
 @patch("pptrans.__main__.reverse_individual_words")
 @patch("pptrans.__main__._extract_run_info_from_slide")
 def test_process_reverse_words_mode_no_text(
