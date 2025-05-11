@@ -300,14 +300,14 @@ def commit_pending_cache_updates(
                 f"  Updated cache for page_hash: {page_hash[:8]}... with "
                 f"{len(translations_list)} items."
             )
-        elif not translations_list:  # translations_list is empty
+        elif page_hash in translation_cache_ref:
+            # Translations_list is empty.
             # If the page_hash already exists in the cache, and the pending update
             # is an empty list, it means we should clear its translations.
-            if page_hash in translation_cache_ref:
-                translation_cache_ref[page_hash] = []
-                click.echo(
-                    f"  Cleared translations for existing page_hash: {page_hash[:8]}..."
-                )
+            translation_cache_ref[page_hash] = []
+            click.echo(
+                f"  Cleared translations for existing page_hash: {page_hash[:8]}..."
+            )
             # If page_hash is new and translations_list is empty,
             # we ignore it; it's not added to the cache.
 
