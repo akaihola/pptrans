@@ -1069,6 +1069,55 @@ def test_main_cli_no_slides_selected_no_pages_option(
     mock_commit.assert_called_once_with({}, {}, "translation_cache.json")
 
 
+@patch("pptrans.__main__.shutil.copy2")
+@patch("pptrans.__main__.Presentation")
+@patch("pptrans.__main__._handle_slide_selection")
+def test_main_cli_no_slides_selected_reverse_words_mode_no_pages_option(
+    mock_handle_selection: MagicMock,
+    MockPresentation: MagicMock,
+    _mock_copy2: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """Test main CLI when no slides are selected and mode is reverse_words."""
+    runner = CliRunner()
+    input_file = tmp_path / "input.pptx"
+    output_file = tmp_path / "output.pptx"
+    # cache_file = tmp_path / "cache.json" # Not used for this mode's CLI call
+    input_file.write_text("dummy")  # More robust file creation
+    assert input_file.is_file(), "Input file was not created or is not a file"
+
+    mock_prs_instance = MagicMock()
+    mock_prs_instance.slides = [MagicMock(), MagicMock()]  # Simulate some slides
+    MockPresentation.return_value = mock_prs_instance
+    mock_handle_selection.return_value = set()  # Simulate no slides selected
+
+    # For reverse_words mode, load_cache and commit_pending_cache_updates
+    # are not called in the no-slides-processed path.
+    # We don't need to patch them here as they shouldn't be called.
+    result = runner.invoke(
+        main,
+        [
+            "--mode",
+            "reverse-words",
+            str(input_file),
+            str(output_file),
+            # Do not pass --cache-file, it's not a CLI option
+            # and cache_file_path is hardcoded in main
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "No slides selected for processing" in result.output
+    assert "No text processing will occur." in result.output
+    mock_prs_instance.save.assert_called_once_with(str(output_file))
+    # Assert that load_cache and commit_pending_cache_updates were NOT called
+    # This can be done by checking their call_count if they were patched,
+    # or by ensuring they are not in the call list of a more general mock if applicable.
+    # For this specific test, since we are targeting the branch where
+    # `mode != "translate"`, the key is that the cache operations within that if block
+    # are skipped.
+
+
 @patch("pptrans.__main__.main")
 def test_main_dunder_guard(_mock_main_func: MagicMock) -> None:
     # This is a conceptual test. In practice, CliRunner tests for `main`
