@@ -715,6 +715,47 @@ _EOL_MARKER_DEFAULT = "[EOL_DEFAULT]"
         },
         expected_echo_warnings=[],
     ),
+    # Case: llm_id not in processed_run_details, and its page_hash not in
+    # pending_page_cache_updates
+    # This should trigger the warning about page_hash not being found in
+    # pending_page_cache_updates
+    # and cover branch 225->232 in _process_llm_output_for_page_cache
+    dict(
+        llm_response_lines_in=[
+            f"{_PG2_TXT1_ID}:Translated Text For Unmatched Page{_EOL_MARKER_DEFAULT}",
+        ],
+        global_texts_for_llm_prompt_in=[
+            {  # This entry provides the parsed_text_id and current_page_hash
+                "id": _PG2_TXT1_ID,
+                "original_text_for_cache": "OrigUnmatchedPage",
+                # This hash will not be in pending_page_cache_updates_in:
+                "page_hash": _HASH2,
+            }
+        ],
+        all_processed_run_details_in=[
+            # _PG2_TXT1_ID is NOT in this list, so the loop in
+            # _process_llm_output_for_page_cache will complete without finding it.
+            {"llm_id": _PG1_TXT1_ID, "final_translation": "Existing translation"},
+        ],
+        # _HASH2 is NOT in pending_page_cache_updates_in
+        pending_page_cache_updates_in={_HASH1: []},
+        expected_all_processed_run_details_after=[
+            # Should remain unchanged as _PG2_TXT1_ID was not processed for update here
+            {"llm_id": _PG1_TXT1_ID, "final_translation": "Existing translation"},
+        ],
+        expected_pending_page_cache_updates_after={
+            _HASH1: [],  # This hash remains as it was
+            _HASH2: [  # This hash is added by the code path being tested
+                {
+                    "original_text": "OrigUnmatchedPage",
+                    "translation": "Translated Text For Unmatched Page",
+                }
+            ],
+        },
+        expected_echo_warnings=[
+            f"Warning: page_hash {_HASH2} not pre-initialized",
+        ],
+    ),
     eol_marker=_EOL_MARKER_DEFAULT,  # Default for all test cases
     ids=[
         "valid_update",
@@ -727,6 +768,7 @@ _EOL_MARKER_DEFAULT = "[EOL_DEFAULT]"
         "llm_response_without_eol_marker_at_end",
         "general_exception_during_parsing",  # This ID will be used by the test
         "empty_line_in_response",
+        "llm_id_not_in_processed_details_hash_not_in_pending",  # Covers 225->232
     ],
 )
 def test_update_data_from_llm_response(
@@ -778,6 +820,7 @@ def test_update_data_from_llm_response(
 _H1_COMMIT = "hash1_commit"
 _H2_COMMIT = "hash2_commit"
 _H3_COMMIT = "hash3_commit"
+_H_EMPTY_COVERAGE = "hash_empty_for_coverage_commit"  # For 303->296 coverage
 
 
 @pytest.mark.kwparametrize(
@@ -809,10 +852,11 @@ _H3_COMMIT = "hash3_commit"
         pending_updates={_H2_COMMIT: []},
         expected_final_cache_content={
             _H1_COMMIT: [{"original_text": "orig1", "translation": "trans1"}],
-            _H2_COMMIT: [],
+            # _H2_COMMIT is no longer added due to the code change (new and empty list)
         },
         expected_echo_substrings=[
-            f"Storing empty translation list for page_hash: {_H2_COMMIT[:8]}"
+            # Only the general message, no specific for H2:
+            "Updating and preparing to save"
         ],
     ),
     dict(
@@ -822,7 +866,7 @@ _H3_COMMIT = "hash3_commit"
         pending_updates={_H1_COMMIT: []},  # Existing hash, now empty list
         expected_final_cache_content={_H1_COMMIT: []},
         expected_echo_substrings=[
-            f"Storing empty translation list for page_hash: {_H1_COMMIT[:8]}"
+            f"Cleared translations for existing page_hash: {_H1_COMMIT[:8]}"
         ],
     ),
     dict(
@@ -847,12 +891,26 @@ _H3_COMMIT = "hash3_commit"
         },
         expected_echo_substrings=[f"Updated cache for page_hash: {_H3_COMMIT[:8]}"],
     ),
+    # Case: Single pending update with an empty list for a new hash.
+    # This is to ensure branch 303->(else) in commit_pending_cache_updates is covered
+    # (specifically, where page_hash is new and translations_list is empty).
+    # The elif not translations_list: is hit, and page_hash is not in
+    # translation_cache_ref.
+    dict(
+        initial_translation_cache={"existing_hash": [{"ot": "o", "tt": "t"}]},
+        pending_updates={_H_EMPTY_COVERAGE: []},
+        expected_final_cache_content={
+            "existing_hash": [{"ot": "o", "tt": "t"}]
+        },  # _H_EMPTY_COVERAGE not added
+        expected_echo_substrings=[],  # No update message for _H_EMPTY_COVERAGE
+    ),
     ids=[
         "add_new_and_update_existing_hash",
         "pending_has_empty_list_for_new_hash",
         "pending_has_empty_list_for_existing_hash",
         "empty_pending_updates",
         "pending_updates_one_item_no_existing",
+        "commit_one_new_hash_with_empty_list",  # Covers 303->296
     ],
 )
 def test_commit_pending_cache_updates(

@@ -26,6 +26,7 @@ pptrans = "pptrans.__main__:main"
 dev = [
     "mypy",
     "pytest",
+    "pytest-cov",
     "pytest-kwparametrize",
     "pytest-mock",
 ]
