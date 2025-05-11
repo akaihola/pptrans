@@ -65,26 +65,21 @@ def _extract_run_info_from_slide(slide_obj: PptxSlide) -> list[dict[str, Any]]:
     run_info_list: list[dict[str, Any]] = []
     for shape in slide_obj.shapes:
         if shape.has_text_frame:
-            for paragraph in shape.text_frame.paragraphs:
-                for run in paragraph.runs:
-                    original_text = run.text
-                    if original_text:
-                        run_info_list.append(
-                            {"original_text": original_text, "run_object": run}
-                        )
+            run_info_list.extend(
+                {"original_text": run.text, "run_object": run}
+                for paragraph in shape.text_frame.paragraphs
+                for run in paragraph.runs
+                if run.text
+            )
         if shape.has_table:
-            for _row_idx, row in enumerate(shape.table.rows):
-                for _col_idx, cell in enumerate(row.cells):
-                    for paragraph in cell.text_frame.paragraphs:
-                        for run_item in paragraph.runs:  # Renamed run to run_item
-                            original_text = run_item.text
-                            if original_text:
-                                run_info_list.append(
-                                    {
-                                        "original_text": original_text,
-                                        "run_object": run_item,
-                                    }
-                                )
+            run_info_list.extend(
+                {"original_text": run.text, "run_object": run}
+                for row in shape.table.rows
+                for cell in row.cells
+                for paragraph in cell.text_frame.paragraphs
+                for run in paragraph.runs
+                if run.text
+            )
     return run_info_list
 
 
