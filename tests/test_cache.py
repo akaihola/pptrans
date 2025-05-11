@@ -865,15 +865,17 @@ _H_EMPTY_COVERAGE = "hash_empty_for_coverage_commit"  # For 303->296 coverage
         },
         pending_updates={
             _H1_COMMIT: [],  # First item: Existing hash, empty list
-            _H2_COMMIT: [{"original_text": "orig2", "translation": "trans2"}] # Second item: New hash
+            # Second item: New hash:
+            _H2_COMMIT: [{"original_text": "orig2", "translation": "trans2"}],
         },
         expected_final_cache_content={
-            _H1_COMMIT: [], # Gets cleared
-            _H2_COMMIT: [{"original_text": "orig2", "translation": "trans2"}] # Gets added
+            _H1_COMMIT: [],  # Gets cleared
+            # Gets added:
+            _H2_COMMIT: [{"original_text": "orig2", "translation": "trans2"}],
         },
         expected_echo_substrings=[
             f"Cleared translations for existing page_hash: {_H1_COMMIT[:8]}",
-            f"Updated cache for page_hash: {_H2_COMMIT[:8]}"
+            f"Updated cache for page_hash: {_H2_COMMIT[:8]}",
         ],
     ),
     dict(
@@ -911,13 +913,58 @@ _H_EMPTY_COVERAGE = "hash_empty_for_coverage_commit"  # For 303->296 coverage
         },  # _H_EMPTY_COVERAGE not added
         expected_echo_substrings=[],  # No update message for _H_EMPTY_COVERAGE
     ),
+    # Case: Existing hash with empty list, followed by a valid item
+    # Ensures loop continues after clearing an existing item.
+    dict(
+        initial_translation_cache={
+            _H1_COMMIT: [{"original_text": "orig1", "translation": "trans1"}]
+        },
+        pending_updates={
+            _H1_COMMIT: [],  # Existing hash, empty list
+            # New hash, valid item:
+            _H2_COMMIT: [{"original_text": "orig2", "translation": "trans2"}],
+        },
+        expected_final_cache_content={
+            _H1_COMMIT: [],  # Gets cleared
+            # Gets added:
+            _H2_COMMIT: [{"original_text": "orig2", "translation": "trans2"}],
+        },
+        expected_echo_substrings=[
+            f"Cleared translations for existing page_hash: {_H1_COMMIT[:8]}",
+            f"Updated cache for page_hash: {_H2_COMMIT[:8]}",
+        ],
+    ),
+    # Case: New hash with empty list, followed by a valid item
+    # Ensures loop continues after ignoring a new empty item.
+    dict(
+        initial_translation_cache={
+            _H1_COMMIT: [{"original_text": "orig1", "translation": "trans1"}]
+        },
+        pending_updates={
+            _H_EMPTY_COVERAGE: [],  # New hash, empty list (ignored)
+            # New hash, valid item:
+            _H2_COMMIT: [{"original_text": "orig2", "translation": "trans2"}],
+        },
+        expected_final_cache_content={
+            # Unchanged:
+            _H1_COMMIT: [{"original_text": "orig1", "translation": "trans1"}],
+            # Gets added:
+            _H2_COMMIT: [{"original_text": "orig2", "translation": "trans2"}],
+        },
+        expected_echo_substrings=[
+            # No echo for _H_EMPTY_COVERAGE as it's new and empty
+            f"Updated cache for page_hash: {_H2_COMMIT[:8]}",
+        ],
+    ),
     ids=[
         "add_new_and_update_existing_hash",
         "pending_has_empty_list_for_new_hash",
-        "pending_empty_list_for_existing_hash_then_item", # Updated ID
+        "pending_empty_list_for_existing_hash_then_item",
         "empty_pending_updates",
         "pending_updates_one_item_no_existing",
-        "commit_one_new_hash_with_empty_list",  # Covers 303->296
+        "commit_one_new_hash_with_empty_list",
+        "empty_existing_hash_then_valid_item",  # New test ID
+        "empty_new_hash_then_valid_item",  # New test ID
     ],
 )
 def test_commit_pending_cache_updates(
