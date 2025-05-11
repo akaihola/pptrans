@@ -413,7 +413,11 @@ def main(input_path: str, output_path: str, mode: str, pages: str | None) -> Non
             EOL_MARKER,
             text_id_counter,
         )
-    # Click's choice validation handles unknown modes before this point.
+    else:  # pragma: no cover
+        # This case should be prevented by click.Choice on the --mode option.
+        # If execution reaches here, it's an unexpected state.
+        # For robustness, one might raise an error, but relying on Click is typical.
+        pass
 
     prs.save(output_path)
     click.echo(f"Presentation saved in '{mode}' mode to: {output_path}")
