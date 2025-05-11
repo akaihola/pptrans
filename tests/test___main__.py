@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import runpy
+from pathlib import Path  # Import Path for runtime use
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
@@ -12,6 +14,7 @@ from pptrans.__main__ import (
     EOL_MARKER,
     _apply_translations_to_runs,
     _build_llm_prompt_and_data,
+    _emit_save_message,
     _extract_run_info_from_slide,
     _handle_slide_selection,
     _process_reverse_words_mode,
@@ -21,8 +24,6 @@ from pptrans.__main__ import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from pptx.slide import Slide as PptxSlide
 
 
@@ -946,10 +947,6 @@ def test_emit_save_message(
     mock_echo: MagicMock, mode: str, output_path_str: str
 ) -> None:
     """Test the _emit_save_message function."""
-    from pathlib import Path
-
-    from pptrans.__main__ import _emit_save_message
-
     output_path = Path(output_path_str)
     _emit_save_message(mode, output_path)
     mock_echo.assert_called_once_with(
@@ -1138,13 +1135,20 @@ def test_main_cli_no_slides_selected_reverse_words_mode_no_pages_option(
     # are skipped.
 
 
-@patch("pptrans.__main__.main")
-def test_main_dunder_guard(_mock_main_func: MagicMock) -> None:
-    # This is a conceptual test. In practice, CliRunner tests for `main`
-    # cover the behavior of the script's entry point.
-    # We assert that `main` is callable.
-    assert callable(main)
-    # To truly test the `if __name__ == "__main__":` guard, one would typically
-    # run the script as a subprocess or use importlib to simulate being the main module.
-    # This is often more involved than necessary if the CLI function itself is
-    # well-tested.
+def test_main_dunder_guard(capsys: pytest.CaptureSys) -> None:
+    """Test the ``if __name__ == '__main__':`` block.
+
+    This test ensures that the main function is called when the script
+    is executed directly.
+    """
+    # Simulate running the script directly using runpy
+    # This will trigger the if __name__ == "__main__": block
+    # and call the patched main function.
+    # sys.argv is patched to prevent pytest args from interfering.
+    script_path = Path("src/pptrans/__main__.py")
+    with (
+        patch("sys.argv", ["src/pptrans/__main__.py", "--help"]),
+        pytest.raises(SystemExit),
+    ):
+        runpy.run_path(str(script_path), run_name="__main__")
+    assert capsys.readouterr().out.startswith("Usage: ")
