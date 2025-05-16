@@ -198,6 +198,7 @@ def _process_translation_mode(
     original_page_indices: list[int],
     cache_file_path: str,
     eol_marker: str,
+    model: str,
 ) -> None:
     """Handle the entire translation process for selected slides."""
     translation_cache = load_cache(cache_file_path)
@@ -275,7 +276,7 @@ def _process_translation_mode(
         click.echo(formatted_text_for_llm)
         click.echo("--- END OF PROMPT ---")
 
-        model_instance = llm.get_model("gemini-2.5-flash-preview-04-17")
+        model_instance = llm.get_model(model)
         response = model_instance.prompt(
             prompt_text, fragments=[formatted_text_for_llm]
         )
@@ -371,14 +372,25 @@ def _process_reverse_words_mode(
         "Processes all pages if not specified."
     ),
 )
+@click.option(
+    "-m",
+    "--model",
+    type=str,
+    default="gemini-2.5-flash-preview-04-17",
+    show_default=True,
+    help="LLM model to use for translation",
+)
 @click.argument("input_path", type=click.Path(exists=True, dir_okay=False))
 @click.argument("output_path", type=click.Path(dir_okay=False))
-def main(input_path: str, output_path: str, mode: str, pages: str | None) -> None:
+def main(
+    input_path: str, output_path: str, mode: str, pages: str | None, model: str
+) -> None:
     """Process a PowerPoint presentation.
 
     It first copies the input presentation to the output path.
     Then, for 'translate' and 'reverse-words' modes, text on selected slides
     within this copied presentation is modified in place.
+    In 'translate' mode, an LLM model can be specified using the --model option.
     'translate' mode uses an on-disk cache.
     Page range can be specified using the --pages option.
     """
@@ -437,6 +449,7 @@ def main(input_path: str, output_path: str, mode: str, pages: str | None) -> Non
             original_page_indices_for_processing,
             cache_file_path,
             EOL_MARKER,
+            model,
         )
     elif mode == "reverse-words":
         _process_reverse_words_mode(

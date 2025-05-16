@@ -619,7 +619,9 @@ def test_process_translation_mode_no_slides(
     mock_commit_cache: MagicMock,
 ) -> None:
     mock_load_cache.return_value = {}
-    _process_translation_mode([], [], "cache.json", EOL_MARKER)
+    _process_translation_mode(
+        [], [], "cache.json", EOL_MARKER, "gemini-2.5-flash-preview-04-17"
+    )
     mock_echo.assert_any_call(
         "No text found to process on selected slides for mode 'translate'."
     )
@@ -692,7 +694,9 @@ def test_process_translation_mode_all_cached(
     mock_prep_slide.return_value = ([], processed_runs, False)
 
     mock_slide = create_mock_slide(shapes=[])
-    _process_translation_mode([mock_slide], [0], "cache.json", EOL_MARKER)
+    _process_translation_mode(
+        [mock_slide], [0], "cache.json", EOL_MARKER, "gemini-2.5-flash-preview-04-17"
+    )
 
     # Print out all echo calls to debug
     for _call in mock_echo.call_args_list:
@@ -893,6 +897,7 @@ def test_process_translation_mode_slide_with_no_text_then_slide_with_text(
         original_page_indices=original_indices_for_call,
         cache_file_path="cache.json",
         eol_marker=EOL_MARKER,
+        model="gemini-2.5-flash-preview-04-17",
     )
 
     # Assertions for the first slide (empty)
@@ -1086,7 +1091,9 @@ def test_process_translation_mode_with_llm_call(
 
     # Action
     mock_slide = MagicMock()
-    _process_translation_mode([mock_slide], [0], "cache.json", EOL_MARKER)
+    _process_translation_mode(
+        [mock_slide], [0], "cache.json", EOL_MARKER, "gemini-2.5-flash-preview-04-17"
+    )
 
     # Assertions
     mock_extract_run.assert_called_once_with(mock_slide)
@@ -1229,6 +1236,8 @@ def test_main_cli() -> None:
                     "output.pptx",
                     "--mode",
                     "translate",
+                    "--model",
+                    "custom-model",
                 ],
                 catch_exceptions=False,
             )
@@ -1239,7 +1248,11 @@ def test_main_cli() -> None:
             # Verify the right functions were called
             mock_copy2.assert_called_once()
             mock_handle_slides.assert_called_once()
+            # Check that the model parameter is passed to the processing function
             mock_process_translate.assert_called_once()
+            args, _ = mock_process_translate.call_args
+            # Check that the model parameter was passed
+            assert args[4] == "custom-model"
             mock_process_reverse.assert_not_called()
 
             # Verify the presentation was saved
@@ -1287,6 +1300,7 @@ def test_main_cli_no_slides_selected_no_pages_option() -> None:
                     "output.pptx",
                     "--mode",
                     "translate",
+                    # Default model should be used
                 ],
                 catch_exceptions=False,
             )
@@ -1350,6 +1364,9 @@ def test_main_cli_no_slides_selected_reverse_words_mode_no_pages_option() -> Non
                     "output.pptx",
                     "--mode",
                     "reverse-words",
+                    # Model parameter is ignored in reverse-words mode
+                    "--model",
+                    "ignored-model",
                 ],
                 catch_exceptions=False,
             )
