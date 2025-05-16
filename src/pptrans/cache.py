@@ -317,4 +317,9 @@ def commit_pending_cache_updates(
             # If page_hash is new and translations_list is empty,
             # we ignore it; it's not added to the cache.
 
-    save_cache(translation_cache_ref, cache_file_path)
+    # Only save the cache if there's actually something in it
+    if translation_cache_ref:
+        save_cache(translation_cache_ref, cache_file_path)
+
+    # Clear pending updates now that they've been committed to the main cache
+    pending_page_cache_updates.clear()

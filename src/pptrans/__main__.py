@@ -83,7 +83,7 @@ def _extract_run_info_from_slide(slide_obj: PptxSlide) -> list[dict[str, Any]]:
                                 "shape_y": shape_y,
                             }
                         )
-                        run_idx_in_shape += 1
+                    run_idx_in_shape += 1
 
         if shape.has_table:
             for row in shape.table.rows:
@@ -101,7 +101,7 @@ def _extract_run_info_from_slide(slide_obj: PptxSlide) -> list[dict[str, Any]]:
                                         "shape_y": shape_y,
                                     }
                                 )
-                                run_idx_in_shape += 1
+                            run_idx_in_shape += 1
 
     return run_info_list
 
@@ -168,9 +168,17 @@ def _apply_translations_to_runs(
     click.echo(
         "Replacing text with translations on slides in the copied presentation..."
     )
+
+    if not all_processed_run_details:
+        click.echo("No translations to apply.")
+        return
+
     for item in all_processed_run_details:
         if item["final_translation"] is not None:
             item["run_object"].text = item["final_translation"]
+            click.echo(
+                f"Applied translation for run: {item['final_translation'][:30]}..."
+            )
         elif not item.get(
             "from_cache", False
         ):  # Only warn if it was supposed to be LLM translated
