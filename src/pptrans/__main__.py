@@ -65,8 +65,8 @@ def _extract_run_info_from_slide(slide_obj: PptxSlide) -> list[dict[str, Any]]:
     run_info_list: list[dict[str, Any]] = []
     for shape_idx, shape in enumerate(slide_obj.shapes):
         # Ensure shape coordinates are integers, defaulting to 0 if None
-        shape_x = int(shape.left) if shape.left is not None else 0
-        shape_y = int(shape.top) if shape.top is not None else 0
+        shape_x = int(shape.left / 1000) if shape.left is not None else 0
+        shape_y = int(shape.top / 1000) if shape.top is not None else 0
         run_idx_in_shape = 0
 
         if shape.has_text_frame:
@@ -138,20 +138,22 @@ def _build_llm_prompt_and_data(texts_for_llm: list[dict[str, Any]]) -> tuple[str
         "PRESERVE ALL LEADING AND TRAILING WHITESPACE from the original "
         "segment in your translation. "
         f"If an EOL marker '{EOL_MARKER}' was present at the end of the input segment, "
-        f"IT MUST be present at the end of your translated segment, including "
+        "IT MUST be present at the end of your translated segment, including "
         "any whitespace before it.\n"
         "For example, if you receive:\n"
-        "pg1,el0,run0,x=100,y=200:Tämä on pitkä \n"
-        "pg1,el0,run1,x=100,y=200:lause, joka on \n"
+        f"pg1,el0,run0,x=100,y=200:Tämä on pitkä {EOL_MARKER}\n"
+        f"pg1,el0,run1,x=100,y=200:lause, joka on {EOL_MARKER}\n"
         f"pg1,el0,run2,x=100,y=200:jaettu.{EOL_MARKER}\n"
         f"pg1,el1,run0,x=50,y=300:    Toinen lause.   {EOL_MARKER}\n"
-        "pg2,el0,run0,x=120,y=220:Yksittäinen.\n"
+        f"pg2,el0,run0,x=120,y=220:Tässä on kaksoispiste{EOL_MARKER}\n"
+        f"pg2,el0,run1,x=120,y=220::{EOL_MARKER}\n"
         "You MUST return:\n"
-        "pg1,el0,run0:This is a long \n"
-        "pg1,el0,run1:sentence that has been \n"
+        f"pg1,el0,run0:This is a long {EOL_MARKER}\n"
+        f"pg1,el0,run1:sentence that has been {EOL_MARKER}\n"
         f"pg1,el0,run2:split.{EOL_MARKER}\n"
         f"pg1,el1,run0:    Another sentence.   {EOL_MARKER}\n"
-        "pg2,el0,run0:Standalone.\n\n"
+        f"pg2,el0,run0:Here's a colon{EOL_MARKER}\n"
+        f"pg2,el0,run1::{EOL_MARKER}\n"
         "Do not add any extra explanations, apologies, or "
         "introductory/concluding remarks. "
         "Only provide the ID followed by the translated text for each item.\n\n"
