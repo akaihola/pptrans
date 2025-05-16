@@ -55,17 +55,15 @@ def prepare_slide_for_translation(
     slide_run_info: list[dict[str, Any]],
     page_hash: str,
     translation_cache: dict[str, list[dict[str, str]]],
-    text_id_counter: int,
     eol_marker: str,
     page_number_1_indexed: int,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int, bool]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
     """Prepare slide text runs for translation, checking against the cache.
 
     Args:
         slide_run_info: List of {"original_text": ..., "run_object": ...}.
         page_hash: Hash of the current slide's content.
         translation_cache: The current translation cache.
-        text_id_counter: Current unique ID counter for LLM texts.
         eol_marker: End-of-line marker string.
         page_number_1_indexed: 1-indexed page number of the current slide.
 
@@ -73,7 +71,6 @@ def prepare_slide_for_translation(
         A tuple containing:
             - texts_for_llm: List of items to send to LLM.
             - processed_runs_for_slide: Details for all runs on the slide.
-            - updated_text_id_counter: The new text_id_counter.
             - page_requires_llm_processing: Boolean.
 
     """
@@ -113,16 +110,21 @@ def prepare_slide_for_translation(
                     f"      Partial page cache hit. Text '{original_text[:30]}...' "
                     "not in page's cached list. Sending to LLM."
                 )
-                text_id = f"pg{page_number_1_indexed}_txt{text_id_counter}"
-                text_id_counter += 1
+                llm_id = (
+                    f"pg{page_number_1_indexed},"
+                    f"el{run_detail['shape_idx']},"
+                    f"run{run_detail['run_idx_in_shape']}"
+                )
                 page_requires_llm_processing = True
                 texts_for_llm.append(
                     {
-                        "id": text_id,
+                        "id": llm_id,
                         "original_text_for_cache": original_text,
                         "text_to_send": original_text + eol_marker,
                         "run_object": run_detail["run_object"],
                         "page_hash": page_hash,
+                        "shape_x": run_detail["shape_x"],
+                        "shape_y": run_detail["shape_y"],
                     }
                 )
                 processed_runs_for_slide.append(
@@ -131,7 +133,7 @@ def prepare_slide_for_translation(
                         "final_translation": None,  # Will be filled by LLM
                         "from_cache": False,
                         "original_text": original_text,
-                        "llm_id": text_id,
+                        "llm_id": llm_id,
                     }
                 )
     else:  # Page cache miss
@@ -143,15 +145,20 @@ def prepare_slide_for_translation(
             page_requires_llm_processing = True
         for run_detail in slide_run_info:
             original_text = run_detail["original_text"]
-            text_id = f"pg{page_number_1_indexed}_txt{text_id_counter}"
-            text_id_counter += 1
+            llm_id = (
+                f"pg{page_number_1_indexed},"
+                f"el{run_detail['shape_idx']},"
+                f"run{run_detail['run_idx_in_shape']}"
+            )
             texts_for_llm.append(
                 {
-                    "id": text_id,
+                    "id": llm_id,
                     "original_text_for_cache": original_text,
                     "text_to_send": original_text + eol_marker,
                     "run_object": run_detail["run_object"],
                     "page_hash": page_hash,
+                    "shape_x": run_detail["shape_x"],
+                    "shape_y": run_detail["shape_y"],
                 }
             )
             processed_runs_for_slide.append(
@@ -160,13 +167,12 @@ def prepare_slide_for_translation(
                     "final_translation": None,  # Will be filled by LLM
                     "from_cache": False,
                     "original_text": original_text,
-                    "llm_id": text_id,
+                    "llm_id": llm_id,
                 }
             )
     return (
         texts_for_llm,
         processed_runs_for_slide,
-        text_id_counter,
         page_requires_llm_processing,
     )
 

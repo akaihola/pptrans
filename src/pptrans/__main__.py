@@ -63,23 +63,46 @@ def _handle_slide_selection(
 def _extract_run_info_from_slide(slide_obj: PptxSlide) -> list[dict[str, Any]]:
     """Extract all text run objects and their original text from a slide."""
     run_info_list: list[dict[str, Any]] = []
-    for shape in slide_obj.shapes:
+    for shape_idx, shape in enumerate(slide_obj.shapes):
+        # Ensure shape coordinates are integers, defaulting to 0 if None
+        shape_x = int(shape.left) if shape.left is not None else 0
+        shape_y = int(shape.top) if shape.top is not None else 0
+        run_idx_in_shape = 0
+
         if shape.has_text_frame:
-            run_info_list.extend(
-                {"original_text": run.text, "run_object": run}
-                for paragraph in shape.text_frame.paragraphs
-                for run in paragraph.runs
-                if run.text
-            )
+            for paragraph in shape.text_frame.paragraphs:
+                for run in paragraph.runs:
+                    if run.text:
+                        run_info_list.append(
+                            {
+                                "original_text": run.text,
+                                "run_object": run,
+                                "shape_idx": shape_idx,
+                                "run_idx_in_shape": run_idx_in_shape,
+                                "shape_x": shape_x,
+                                "shape_y": shape_y,
+                            }
+                        )
+                        run_idx_in_shape += 1
+
         if shape.has_table:
-            run_info_list.extend(
-                {"original_text": run.text, "run_object": run}
-                for row in shape.table.rows
-                for cell in row.cells
-                for paragraph in cell.text_frame.paragraphs
-                for run in paragraph.runs
-                if run.text
-            )
+            for row in shape.table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.text_frame.paragraphs:
+                        for run in paragraph.runs:
+                            if run.text:
+                                run_info_list.append(
+                                    {
+                                        "original_text": run.text,
+                                        "run_object": run,
+                                        "shape_idx": shape_idx,
+                                        "run_idx_in_shape": run_idx_in_shape,
+                                        "shape_x": shape_x,
+                                        "shape_y": shape_y,
+                                    }
+                                )
+                                run_idx_in_shape += 1
+
     return run_info_list
 
 
@@ -87,21 +110,30 @@ def _extract_run_info_from_slide(slide_obj: PptxSlide) -> list[dict[str, Any]]:
 def _build_llm_prompt_and_data(texts_for_llm: list[dict[str, Any]]) -> tuple[str, str]:
     """Construct the LLM prompt and the formatted data string."""
     formatted_text_for_llm = "\n".join(
-        [f"{item['id']}:{item['text_to_send']}" for item in texts_for_llm]
+        [
+            f"{item['id']},x={item['shape_x']},y={item['shape_y']}:{item['text_to_send']}"
+            for item in texts_for_llm
+        ]
     )
     # EOL_MARKER is a global constant in this module
     prompt_text = (
         "You are an expert Finnish to English translator. "
         "Translate the following text segments accurately from Finnish to "
         "English. "
-        "Each segment is prefixed with a unique ID (e.g., pg1_txt0, pg1_txt1). "
-        "IMPORTANT: A sequence of text items (e.g., pg1_txt0, pg1_txt1, "
-        "pg1_txt2) may represent a single continuous sentence that has been "
-        "split due to formatting. Interpret and translate such sequences as a "
-        "coherent whole sentence to maintain context and flow. "
+        "Each segment is prefixed with a unique ID in the format "
+        "pg<PageNum>,el<ElementIdx>,run<RunIdxInElement>. "
+        "The ID is followed by the x and y coordinates of the text's parent "
+        "element (e.g., pg1,el0,run0,x=100,y=200). "
+        "Use these coordinates to understand the spatial relationships between "
+        "text elements for more coherent translation, especially when sentences "
+        "are split across multiple elements. "
+        "IMPORTANT: A sequence of text items (e.g., pg1,el0,run0, "
+        "pg1,el0,run1, pg1,el0,run2) may represent a single continuous sentence "
+        "that has been split due to formatting. Interpret and translate such "
+        "sequences as a coherent whole sentence to maintain context and flow. "
         f"The text for each ID might end with an EOL marker: '{EOL_MARKER}'. "
         "Your response MUST consist ONLY of the translated segments, each "
-        "prefixed with its original ID, "
+        "prefixed with its original ID (OMITTING the coordinates), "
         "and each on a new line. Maintain the exact ID and format. "
         "PRESERVE ALL LEADING AND TRAILING WHITESPACE from the original "
         "segment in your translation. "
@@ -109,17 +141,17 @@ def _build_llm_prompt_and_data(texts_for_llm: list[dict[str, Any]]) -> tuple[str
         f"IT MUST be present at the end of your translated segment, including "
         "any whitespace before it.\n"
         "For example, if you receive:\n"
-        "pg1_txt0: Tämä on pitkä \n"
-        "pg1_txt1:lause, joka on \n"
-        f"pg1_txt2:jaettu.{EOL_MARKER}\n"
-        f"pg1_txt3:    Toinen lause.   {EOL_MARKER}\n"
-        "pg2_txt0: Yksittäinen.\n"
+        "pg1,el0,run0,x=100,y=200:Tämä on pitkä \n"
+        "pg1,el0,run1,x=100,y=200:lause, joka on \n"
+        f"pg1,el0,run2,x=100,y=200:jaettu.{EOL_MARKER}\n"
+        f"pg1,el1,run0,x=50,y=300:    Toinen lause.   {EOL_MARKER}\n"
+        "pg2,el0,run0,x=120,y=220:Yksittäinen.\n"
         "You MUST return:\n"
-        "pg1_txt0: This is a long \n"
-        "pg1_txt1:sentence that has been \n"
-        f"pg1_txt2:split.{EOL_MARKER}\n"
-        f"pg1_txt3:    Another sentence.   {EOL_MARKER}\n"
-        "pg2_txt0: Standalone.\n\n"
+        "pg1,el0,run0:This is a long \n"
+        "pg1,el0,run1:sentence that has been \n"
+        f"pg1,el0,run2:split.{EOL_MARKER}\n"
+        f"pg1,el1,run0:    Another sentence.   {EOL_MARKER}\n"
+        "pg2,el0,run0:Standalone.\n\n"
         "Do not add any extra explanations, apologies, or "
         "introductory/concluding remarks. "
         "Only provide the ID followed by the translated text for each item.\n\n"
@@ -156,10 +188,8 @@ def _process_translation_mode(
     original_page_indices: list[int],
     cache_file_path: str,
     eol_marker: str,
-    text_id_counter_start: int,
-) -> int:
+) -> None:
     """Handle the entire translation process for selected slides."""
-    current_text_id_counter = text_id_counter_start
     translation_cache = load_cache(cache_file_path)
 
     global_texts_for_llm_prompt: list[dict[str, Any]] = []
@@ -191,13 +221,11 @@ def _process_translation_mode(
             (
                 texts_for_llm_slide,
                 processed_runs_slide,
-                current_text_id_counter,
                 page_requires_llm,
             ) = prepare_slide_for_translation(
                 run_info_on_slide,
                 page_hash,
                 translation_cache,
-                current_text_id_counter,
                 eol_marker,
                 current_page_num_1_indexed,
             )
@@ -212,7 +240,7 @@ def _process_translation_mode(
         commit_pending_cache_updates(
             translation_cache, pending_page_cache_updates, cache_file_path
         )
-        return current_text_id_counter
+        return
 
     click.echo(
         f"Processed {len(all_processed_run_details)} total text runs. "
@@ -260,7 +288,7 @@ def _process_translation_mode(
     commit_pending_cache_updates(
         translation_cache, pending_page_cache_updates, cache_file_path
     )
-    return current_text_id_counter
+    return
 
 
 # Mode-specific processing function for "reverse-words"
@@ -268,10 +296,8 @@ def _process_reverse_words_mode(
     slides_to_process: list[PptxSlide],
     original_page_indices: list[int],
     eol_marker: str,
-    text_id_counter_start: int,
-) -> int:
+) -> None:
     """Handle the reverse words process for selected slides."""
-    current_text_id_counter = text_id_counter_start
     text_elements_for_reverse: list[dict[str, Any]] = []
 
     if slides_to_process:
@@ -281,22 +307,20 @@ def _process_reverse_words_mode(
         )
         for slide_idx, slide_to_extract in enumerate(slides_to_process):
             original_page_0_indexed = original_page_indices[slide_idx]
-            current_page_num_1_indexed = original_page_0_indexed + 1
+            original_page_0_indexed + 1
 
             run_info_on_slide = _extract_run_info_from_slide(slide_to_extract)
 
             for run_detail in run_info_on_slide:
                 original_text = run_detail["original_text"]
                 text_with_eol = original_text + eol_marker
-                text_id = f"pg{current_page_num_1_indexed}_txt{current_text_id_counter}"
+                # text_id is not used in reverse-words mode, so no need to generate it
                 text_elements_for_reverse.append(
                     {
-                        "id": text_id,
                         "text_with_eol_for_reverse": text_with_eol,
                         "run_object": run_detail["run_object"],
                     }
                 )
-                current_text_id_counter += 1
 
     if not text_elements_for_reverse:
         click.echo(
@@ -315,7 +339,6 @@ def _process_reverse_words_mode(
             final_reversed_text = reversed_text_with_eol.removesuffix(eol_marker)
             item["run_object"].text = final_reversed_text
         click.echo("Text replaced with reversed-word text on slides.")
-    return current_text_id_counter
 
 
 @click.command()
@@ -398,22 +421,18 @@ def main(input_path: str, output_path: str, mode: str, pages: str | None) -> Non
         f"slides (out of {num_original_slides} total) in the copied presentation..."
     )
 
-    text_id_counter = 0
-
     if mode == "translate":
-        text_id_counter = _process_translation_mode(
+        _process_translation_mode(
             slides_to_process_objects,
             original_page_indices_for_processing,
             cache_file_path,
             EOL_MARKER,
-            text_id_counter,
         )
     elif mode == "reverse-words":
-        text_id_counter = _process_reverse_words_mode(
+        _process_reverse_words_mode(
             slides_to_process_objects,
             original_page_indices_for_processing,
             EOL_MARKER,
-            text_id_counter,
         )
     else:  # pragma: no cover
         # This case should be prevented by click.Choice on the --mode option.

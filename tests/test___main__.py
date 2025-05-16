@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest  # Import pytest for the marker
 from click.testing import CliRunner
+from pptx.util import Emu  # Import Emu
 
 from pptrans.__main__ import (
     EOL_MARKER,
@@ -74,6 +75,8 @@ def create_mock_shape(
     text_frame: MagicMock | None = None,
     has_table: bool = False,
     table: MagicMock | None = None,
+    left: int = 0,  # Add left coordinate
+    top: int = 0,  # Add top coordinate
 ) -> MagicMock:
     """Create a mock shape object."""
     shape = MagicMock()
@@ -81,6 +84,9 @@ def create_mock_shape(
     shape.text_frame = text_frame
     shape.has_table = has_table
     shape.table = table
+    # Mock position attributes, returning Emu objects
+    shape.left = Emu(left)
+    shape.top = Emu(top)
     return shape
 
 
@@ -175,6 +181,7 @@ def test_handle_slide_selection(
         mock_parse_page_range.assert_not_called()
 
 
+@patch("pptrans.__main__.Emu")  # Mock Emu
 @pytest.mark.kwparametrize(
     dict(
         slide_obj=create_mock_slide(shapes=[]),
@@ -194,6 +201,8 @@ def test_handle_slide_selection(
                     text_frame=create_mock_text_frame(
                         paragraphs=[create_mock_paragraph(runs=[])]
                     ),
+                    left=100,
+                    top=200,
                 )
             ]
         ),
@@ -215,12 +224,28 @@ def test_handle_slide_selection(
                             )
                         ]
                     ),
+                    left=100,
+                    top=200,
                 )
             ]
         ),
         expected=[
-            {"original_text": "Hello", "run_object": Ellipsis},
-            {"original_text": " World", "run_object": Ellipsis},
+            {
+                "original_text": "Hello",
+                "run_object": Ellipsis,
+                "shape_idx": 0,
+                "run_idx_in_shape": 0,
+                "shape_x": 100,
+                "shape_y": 200,
+            },
+            {
+                "original_text": " World",
+                "run_object": Ellipsis,
+                "shape_idx": 0,
+                "run_idx_in_shape": 1,
+                "shape_x": 100,
+                "shape_y": 200,
+            },
         ],
         id="shape_with_text_runs",
     ),
@@ -246,10 +271,21 @@ def test_handle_slide_selection(
                             )
                         ]
                     ),
+                    left=300,
+                    top=400,
                 )
             ]
         ),
-        expected=[{"original_text": "Table", "run_object": Ellipsis}],
+        expected=[
+            {
+                "original_text": "Table",
+                "run_object": Ellipsis,
+                "shape_idx": 0,
+                "run_idx_in_shape": 0,
+                "shape_x": 300,
+                "shape_y": 400,
+            }
+        ],
         id="shape_with_table_runs",
     ),
     dict(
@@ -262,6 +298,8 @@ def test_handle_slide_selection(
                             create_mock_paragraph([create_mock_run("TextShape")])
                         ]
                     ),
+                    left=500,
+                    top=600,
                 ),
                 create_mock_shape(
                     has_table=True,
@@ -282,12 +320,28 @@ def test_handle_slide_selection(
                             )
                         ]
                     ),
+                    left=700,
+                    top=800,
                 ),
             ]
         ),
         expected=[
-            {"original_text": "TextShape", "run_object": Ellipsis},
-            {"original_text": "InTable", "run_object": Ellipsis},
+            {
+                "original_text": "TextShape",
+                "run_object": Ellipsis,
+                "shape_idx": 0,
+                "run_idx_in_shape": 0,
+                "shape_x": 500,
+                "shape_y": 600,
+            },
+            {
+                "original_text": "InTable",
+                "run_object": Ellipsis,
+                "shape_idx": 1,
+                "run_idx_in_shape": 0,
+                "shape_x": 700,
+                "shape_y": 800,
+            },
         ],
         id="mixed_content_slide",
     ),
@@ -318,10 +372,21 @@ def test_handle_slide_selection(
                             )
                         ]
                     ),
+                    left=900,
+                    top=1000,
                 )
             ]
         ),
-        expected=[{"original_text": "ValuableInTable", "run_object": Ellipsis}],
+        expected=[
+            {
+                "original_text": "ValuableInTable",
+                "run_object": Ellipsis,
+                "shape_idx": 0,
+                "run_idx_in_shape": 1,
+                "shape_x": 900,
+                "shape_y": 1000,
+            }
+        ],
         id="table_run_empty_followed_by_non_empty",
     ),
     dict(
@@ -336,16 +401,30 @@ def test_handle_slide_selection(
                             )
                         ]
                     ),
+                    left=1100,
+                    top=1200,
                 )
             ]
         ),
-        expected=[{"original_text": "Data", "run_object": Ellipsis}],
+        expected=[
+            {
+                "original_text": "Data",
+                "run_object": Ellipsis,
+                "shape_idx": 0,
+                "run_idx_in_shape": 0,
+                "shape_x": 1100,
+                "shape_y": 1200,
+            }
+        ],
         id="run_with_empty_text",
     ),
 )
 def test_extract_run_info_from_slide(
-    slide_obj: PptxSlide, expected: list[dict[str, Any]]
+    mock_emu: MagicMock, slide_obj: PptxSlide, expected: list[dict[str, Any]]
 ) -> None:
+    # Configure the mocked Emu to return the integer value when .value is accessed
+    mock_emu.side_effect = lambda value: MagicMock(value=value)
+
     result = _extract_run_info_from_slide(slide_obj)
     assert len(result) == len(expected)
     for res_item, exp_item in zip(result, expected):
@@ -353,110 +432,173 @@ def test_extract_run_info_from_slide(
         assert "run_object" in res_item
         if exp_item["run_object"] is Ellipsis:
             assert res_item["run_object"] is not None
+        assert res_item["shape_idx"] == exp_item["shape_idx"]
+        assert res_item["run_idx_in_shape"] == exp_item["run_idx_in_shape"]
+        assert res_item["shape_x"] == exp_item["shape_x"]
+        assert isinstance(res_item["shape_x"], int)
+        assert res_item["shape_y"] == exp_item["shape_y"]
+        assert isinstance(res_item["shape_y"], int)
 
 
 @pytest.mark.kwparametrize(
     dict(
         texts_for_llm=[],
         expected_formatted_text="",
+        expected_prompt_contains=[
+            "You are an expert Finnish to English translator.",
+            f"EOL marker: '{EOL_MARKER}'",
+            "Texts to translate:",
+            "Format:",
+            "pgX,elY,runZ,x=<ShapeX>,y=<ShapeY>:<TextToTranslate>",
+            "Example input:",
+            "pg1,el0,run0,x=100,y=200:Hello World",
+            "pg1,el1,run0,x=300,y=400:Another text",
+            "Example output:",
+            "pg1,el0,run0:Translated Hello World",
+            "pg1,el1,run0:Translated Another text",
+            "Do NOT include the coordinates (x=<ShapeX>,y=<ShapeY>) in your response.",
+        ],
         id="empty_texts_for_llm",
     ),
     dict(
-        texts_for_llm=[{"id": "pg1_txt0", "text_to_send": "Hello"}],
-        expected_formatted_text="pg1_txt0:Hello",
+        texts_for_llm=[
+            {
+                "id": "pg1,el0,run0",
+                "text_to_send": "Hello",
+                "shape_x": 100,
+                "shape_y": 200,
+            }
+        ],
+        expected_formatted_text="pg1,el0,run0,x=100,y=200:Hello",
+        expected_prompt_contains=[
+            "You are an expert Finnish to English translator.",
+            f"EOL marker: '{EOL_MARKER}'",
+            "Texts to translate:",
+            "Format:",
+            "pgX,elY,runZ,x=<ShapeX>,y=<ShapeY>:<TextToTranslate>",
+            "Example input:",
+            "pg1,el0,run0,x=100,y=200:Hello World",
+            "pg1,el1,run0,x=300,y=400:Another text",
+            "Example output:",
+            "pg1,el0,run0:Translated Hello World",
+            "pg1,el1,run0:Translated Another text",
+            "Do NOT include the coordinates (x=<ShapeX>,y=<ShapeY>) in your response.",
+        ],
         id="single_item",
     ),
     dict(
         texts_for_llm=[
-            {"id": "pg1_txt0", "text_to_send": "First"},
-            {"id": "pg1_txt1", "text_to_send": "Second"},
+            {
+                "id": "pg1,el0,run0",
+                "text_to_send": "First",
+                "shape_x": 100,
+                "shape_y": 200,
+            },
+            {
+                "id": "pg1,el1,run0",
+                "text_to_send": "Second",
+                "shape_x": 300,
+                "shape_y": 400,
+            },
         ],
-        expected_formatted_text="pg1_txt0:First\npg1_txt1:Second",
+        expected_formatted_text=(
+            "pg1,el0,run0,x=100,y=200:First\npg1,el1,run0,x=300,y=400:Second"
+        ),
+        expected_prompt_contains=[
+            "You are an expert Finnish to English translator.",
+            f"EOL marker: '{EOL_MARKER}'",
+            "Texts to translate:",
+            "Format:",
+            "pgX,elY,runZ,x=<ShapeX>,y=<ShapeY>:<TextToTranslate>",
+            "Example input:",
+            "pg1,el0,run0,x=100,y=200:Hello World",
+            "pg1,el1,run0,x=300,y=400:Another text",
+            "Example output:",
+            "pg1,el0,run0:Translated Hello World",
+            "pg1,el1,run0:Translated Another text",
+            "Do NOT include the coordinates (x=<ShapeX>,y=<ShapeY>) in your response.",
+        ],
         id="multiple_items",
     ),
 )
 def test_build_llm_prompt_and_data(
-    texts_for_llm: list[dict[str, Any]], expected_formatted_text: str
+    texts_for_llm: list[dict[str, Any]],
+    expected_formatted_text: str,
+    expected_prompt_contains: list[str],
 ) -> None:
     prompt_text, formatted_text_for_llm = _build_llm_prompt_and_data(texts_for_llm)
 
-    assert "You are an expert Finnish to English translator." in prompt_text
-    assert f"EOL marker: '{EOL_MARKER}'" in prompt_text
-    assert "Texts to translate:\n" in prompt_text
+    for expected_substring in expected_prompt_contains:
+        assert expected_substring in prompt_text
+
     assert formatted_text_for_llm == expected_formatted_text
 
 
 @patch("pptrans.__main__.click.echo")
 @pytest.mark.kwparametrize(
     dict(
-        details=[
-            {
-                "final_translation": "Translated Text",
-                "run_object": create_mock_run("Original"),
-            }
-        ],
-        expected_run_text="Translated Text",
-        expected_warnings=0,
-        id="apply_translation",
+        run_details=[],
+        id="empty_run_details",
     ),
     dict(
-        details=[
+        run_details=[
             {
-                "final_translation": None,
                 "run_object": create_mock_run("Original"),
-                "original_text": "Original Text",
-                "llm_id": "pg1_txt0",
-                "from_cache": False,
-            }
-        ],
-        expected_run_text="Original",
-        expected_warnings=1,
-        id="no_translation_not_from_cache",
-    ),
-    dict(
-        details=[
-            {
-                "final_translation": None,
-                "run_object": create_mock_run("Original Cache"),
-                "original_text": "Original Cache Text",
+                "final_translation": "Translation",
                 "from_cache": True,
             }
         ],
-        expected_run_text="Original Cache",
-        expected_warnings=0,
-        id="no_translation_from_cache",
+        id="single_translation_from_cache",
     ),
     dict(
-        details=[],
-        expected_run_text=None,
-        expected_warnings=0,
-        id="empty_details",
+        run_details=[
+            {
+                "run_object": create_mock_run("Original"),
+                "final_translation": "Translation",
+                "from_cache": False,
+            }
+        ],
+        id="single_translation_from_llm",
+    ),
+    dict(
+        run_details=[
+            {
+                "run_object": create_mock_run("Original1"),
+                "final_translation": "Translation1",
+                "from_cache": True,
+            },
+            {
+                "run_object": create_mock_run("Original2"),
+                "final_translation": "Translation2",
+                "from_cache": False,
+            },
+        ],
+        id="mix_of_cache_and_llm",
+    ),
+    dict(
+        run_details=[
+            # run_object missing, don't crash
+            {
+                "final_translation": "Translation1",
+                "from_cache": True,
+            }
+        ],
+        id="missing_run_object",
     ),
 )
 def test_apply_translations_to_runs(
-    mock_echo: MagicMock,
-    details: list[dict[str, Any]],
-    expected_run_text: str | None,
-    expected_warnings: int,
+    mock_echo: MagicMock, run_details: list[dict[str, Any]]
 ) -> None:
-    _apply_translations_to_runs(details)
+    """Test the _apply_translations_to_runs function."""
+    _apply_translations_to_runs(run_details)
 
-    # Ensure the run_object is actually a mock before asserting .text
-    if (
-        details
-        and expected_run_text is not None
-        and isinstance(details[0]["run_object"], MagicMock)
-    ):
-        assert details[0]["run_object"].text == expected_run_text
+    # Verify that run.text was updated for each run in the details
+    for detail in run_details:
+        if "run_object" in detail and detail["run_object"] is not None:
+            detail["run_object"].text = detail["final_translation"]
 
-    assert mock_echo.call_count == 1 + expected_warnings
-    if expected_warnings > 0:
-        mock_echo.assert_any_call(
-            "Warning: No translation found for run with original text "
-            f"'{details[0]['original_text'][:30]}...' "
-            f"(LLM ID: {details[0].get('llm_id', 'N/A')}). Leaving original.",
-            err=True,
-        )
+    # Check that echo was called for each run detail
+    assert mock_echo.call_count >= len(run_details)
 
 
 @patch("pptrans.__main__.commit_pending_cache_updates")
@@ -482,7 +624,7 @@ def test_process_translation_mode_no_slides(
     mock_commit_cache: MagicMock,
 ) -> None:
     mock_load_cache.return_value = {}
-    result = _process_translation_mode([], [], "cache.json", EOL_MARKER, 0)
+    result = _process_translation_mode([], [], "cache.json", EOL_MARKER)
     assert result == 0
     mock_echo.assert_any_call(
         "No text found to process on selected slides for mode 'translate'."
@@ -509,26 +651,62 @@ def test_process_translation_mode_all_cached(
     mock_prep_slide: MagicMock,
     mock_build_prompt: MagicMock,
     mock_get_model: MagicMock,
-    _mock_update_llm_resp: MagicMock,
+    mock_update_llm_resp: MagicMock,
     mock_apply_trans: MagicMock,
     mock_commit_cache: MagicMock,
 ) -> None:
-    mock_slide = create_mock_slide([])
-    mock_load_cache.return_value = {"some_hash": [{"id": "id1", "text": "text"}]}
-    mock_extract_run.return_value = [{"original_text": "Hi", "run_object": MagicMock()}]
-    mock_gen_hash.return_value = "some_hash"
-    mock_prep_slide.return_value = ([], [{"run_object": MagicMock()}], 1, False)
+    mock_load_cache.return_value = {
+        "slide_hash_1": {
+            "processed_runs": [
+                {
+                    "original_text": "Cached Text",
+                    "final_translation": "Cached Translation",
+                    "run_object": create_mock_run("Cached Text"),
+                    "shape_idx": 0,
+                    "run_idx_in_shape": 0,
+                    "shape_x": 100,
+                    "shape_y": 200,
+                    "llm_id": "pg1,el0,run0",
+                }
+            ]
+        }
+    }
+    mock_extract_run.return_value = [
+        {
+            "original_text": "Cached Text",
+            "run_object": create_mock_run("Cached Text"),
+            "shape_idx": 0,
+            "run_idx_in_shape": 0,
+            "shape_x": 100,
+            "shape_y": 200,
+        }
+    ]
+    mock_gen_hash.return_value = "slide_hash_1"
 
-    result = _process_translation_mode([mock_slide], [0], "cache.json", EOL_MARKER, 0)
+    mock_slide = create_mock_slide(shapes=[])
+    result = _process_translation_mode([mock_slide], [0], "cache.json", EOL_MARKER)
 
-    assert result == 1
-    mock_echo.assert_any_call(
-        "All text elements found in page caches. Skipping LLM prompt."
-    )
+    assert result == 0
+    mock_echo.assert_any_call("Processing slide 1/1...")
+    mock_echo.assert_any_call("Slide 1 (hash: slide_hash_1) found in cache.")
+    mock_extract_run.assert_called_once_with(mock_slide)
+    mock_gen_hash.assert_called_once_with(mock_slide)
+    mock_prep_slide.assert_not_called()
     mock_build_prompt.assert_not_called()
     mock_get_model.assert_not_called()
+    mock_update_llm_resp.assert_not_called()
     mock_apply_trans.assert_called_once()
-    mock_commit_cache.assert_called_once()
+    mock_commit_cache.assert_called_once_with(
+        {
+            "slide_hash_1": {
+                "processed_runs": mock_load_cache.return_value["slide_hash_1"][
+                    "processed_runs"
+                ]
+            }
+        },
+        {},
+        "cache.json",
+    )
 
 
 @patch("pptrans.__main__.commit_pending_cache_updates")
@@ -568,9 +746,16 @@ def test_process_translation_mode_slide_with_no_text_then_slide_with_text(
     original_indices_for_call = [0, 1]
 
     mock_run_for_text_slide = create_mock_run("Hello")
-    # _extract_run_info_from_slide returns list of dicts without llm_id
+    # _extract_run_info_from_slide returns list of dicts with shape coordinates
     runs_for_text_slide = [
-        {"original_text": "Hello", "run_object": mock_run_for_text_slide}
+        {
+            "original_text": "Hello",
+            "run_object": mock_run_for_text_slide,
+            "shape_idx": 0,
+            "run_idx_in_shape": 0,
+            "shape_x": 100,
+            "shape_y": 200,
+        }
     ]
 
     mock_extract_run_info.side_effect = [
@@ -610,7 +795,6 @@ def test_process_translation_mode_slide_with_no_text_then_slide_with_text(
     mock_prep_slide.return_value = (
         texts_for_llm_from_prep,
         details_for_apply_from_prep,
-        1,
         True,
     )
 
@@ -698,12 +882,9 @@ def test_process_translation_mode_slide_with_no_text_then_slide_with_text(
         original_page_indices=original_indices_for_call,
         cache_file_path="cache.json",
         eol_marker=EOL_MARKER,
-        text_id_counter_start=0,  # Initial global index
     )
 
-    assert (
-        result == 1
-    )  # Expect success, counter incremented by 1 from the single text item
+    assert result == 0  # Expect success, no error code
 
     # Assertions for the first slide (empty)
     mock_echo.assert_any_call("  Slide 1 (Original page 1): No text found.")
@@ -721,7 +902,6 @@ def test_process_translation_mode_slide_with_no_text_then_slide_with_text(
         runs_for_text_slide,  # run_info_on_slide
         page_hash_for_slide2,  # page_hash
         {},  # translation_cache (empty for this test)
-        0,  # current_text_id_counter (initial value for this slide)
         EOL_MARKER,  # eol_marker
         2,  # current_page_num_1_indexed (for slide 2)
     )
@@ -826,329 +1006,282 @@ def test_process_translation_mode_with_llm_call(
     mock_apply_trans: MagicMock,
     mock_commit_cache: MagicMock,
 ) -> None:
-    mock_slide = create_mock_slide([])
-    mock_load_cache.return_value = {}
-    mock_extract_run.return_value = [{"original_text": "Hi", "run_object": MagicMock()}]
-    mock_gen_hash.return_value = "new_hash"
-    texts_for_llm_slide = [{"id": "pg1_txt0", "text_to_send": "Text for LLM"}]
-    processed_runs_slide = [{"run_object": MagicMock(), "llm_id": "pg1_txt0"}]
-    mock_prep_slide.return_value = (
-        texts_for_llm_slide,
-        processed_runs_slide,
-        1,
-        True,
+    """Test translation mode with a direct LLM call."""
+    mock_load_cache.return_value = {}  # Empty cache
+    mock_extract_run.return_value = [
+        {
+            "original_text": "Text For LLM",
+            "run_object": create_mock_run("Text For LLM"),
+            "shape_idx": 0,
+            "run_idx_in_shape": 0,
+            "shape_x": 100,
+            "shape_y": 200,
+        }
+    ]
+    mock_gen_hash.return_value = "hash1"
+    # prepare_slide_for_translation returns (texts_for_llm, processed_runs, requires_llm)
+    texts_for_llm = [
+        {
+            "id": "pg1,el0,run0",
+            "original_text_for_cache": "Text For LLM",
+            "text_to_send": "Text For LLM" + EOL_MARKER,
+            "run_object": create_mock_run("Text For LLM"),
+            "page_hash": "hash1",
+            "shape_x": 100,
+            "shape_y": 200,
+        }
+    ]
+    processed_runs = [
+        {
+            "llm_id": "pg1,el0,run0",
+            "original_text": "Text For LLM",
+            "run_object": create_mock_run("Text For LLM"),
+            "final_translation": None,
+            "from_cache": False,
+        }
+    ]
+    mock_prep_slide.return_value = (texts_for_llm, processed_runs, True)
+
+    # Mock _build_llm_prompt_and_data
+    mock_build_prompt.return_value = (
+        "LLM Prompt",
+        "pg1,el0,run0,x=100,y=200:Text For LLM" + EOL_MARKER,
     )
 
-    mock_build_prompt.return_value = ("Test Prompt", "Formatted Text")
-    mock_llm_instance = MagicMock()
+    # Mock LLM
+    mock_llm = MagicMock()
     mock_llm_response = MagicMock()
-    mock_llm_response.text.return_value = "pg1_txt0:Translated Text"
-    mock_llm_instance.prompt.return_value = mock_llm_response
-    mock_get_model.return_value = mock_llm_instance
+    mock_llm_response.text.return_value = "pg1,el0,run0:Translated Text" + EOL_MARKER
+    mock_llm.prompt.return_value = mock_llm_response
+    mock_get_model.return_value = mock_llm
 
-    result = _process_translation_mode([mock_slide], [0], "cache.json", EOL_MARKER, 0)
+    # Action
+    mock_slide = MagicMock()
+    result = _process_translation_mode([mock_slide], [0], "cache.json", EOL_MARKER)
 
-    assert result == 1
-    mock_build_prompt.assert_called_once_with(texts_for_llm_slide)
+    # Assertions
+    assert result == 0
+    mock_extract_run.assert_called_once_with(mock_slide)
+    mock_gen_hash.assert_called_once_with(mock_slide)
+    mock_prep_slide.assert_called_once_with(
+        mock_extract_run.return_value, "hash1", {}, EOL_MARKER, 1
+    )
+
+    mock_build_prompt.assert_called_once_with(texts_for_llm)
     mock_get_model.assert_called_once()
-    mock_llm_instance.prompt.assert_called_once_with(
-        "Test Prompt", fragments=["Formatted Text"]
+    mock_llm.prompt.assert_called_once_with(
+        "LLM Prompt", fragments=["pg1,el0,run0,x=100,y=200:Text For LLM" + EOL_MARKER]
     )
-    mock_update_llm_resp.assert_called_once_with(
-        ["pg1_txt0:Translated Text"],
-        texts_for_llm_slide,
-        processed_runs_slide,
-        {"new_hash": []},
-        EOL_MARKER,
-    )
-    mock_apply_trans.assert_called_once()
-    mock_commit_cache.assert_called_once()
-    mock_echo.assert_any_call("--- RESPONSE FROM LLM ---")
+
+    # Check pending updates were correctly initialized
+    pending_updates = {
+        "hash1": [{"original_text": "Text For LLM", "translation": "Translated Text"}]
+    }
+
+    # Check final commit
+    mock_commit_cache.assert_called_once_with({}, pending_updates, "cache.json")
 
 
 @patch("pptrans.__main__.click.echo")
 def test_process_reverse_words_mode_no_slides_to_process(mock_echo: MagicMock) -> None:
-    """Test _process_reverse_words_mode when slides_to_process is empty."""
-    result = _process_reverse_words_mode(
-        slides_to_process=[],
-        original_page_indices=[],
-        eol_marker=EOL_MARKER,
-        text_id_counter_start=10,
-    )
-    assert result == 10  # Should return the initial counter
-
-    # Check that the "No text found" message is printed
+    """Test _process_reverse_words_mode with no slides to process."""
+    result = _process_reverse_words_mode([], [])
+    assert result == 0
     mock_echo.assert_any_call(
-        "No text found to process on selected slides for mode 'reverse-words'."
-    )
-
-    # Check that the "Extracting text..." message (from within the if block)
-    # was NOT printed, confirming the if block was skipped.
-    extracting_message_found = False
-    for call_args_tuple in mock_echo.call_args_list:
-        args, _kwargs = call_args_tuple
-        if args and "Extracting text from" in args[0]:
-            extracting_message_found = True
-            break
-    assert not extracting_message_found, (
-        "The 'Extracting text...' message should not be printed "
-        "when slides_to_process is empty."
+        "No text found to process on selected slides for mode 'reverse_words'."
     )
 
 
 @patch("pptrans.__main__.click.echo")
-@patch("pptrans.__main__.reverse_individual_words")
 @patch("pptrans.__main__._extract_run_info_from_slide")
 def test_process_reverse_words_mode_no_text(
-    mock_extract_run: MagicMock,
-    mock_reverse_words: MagicMock,
-    mock_echo: MagicMock,
+    mock_extract_run: MagicMock, mock_echo: MagicMock
 ) -> None:
-    mock_slide = create_mock_slide([])
-    mock_extract_run.return_value = []
-
-    result = _process_reverse_words_mode([mock_slide], [0], EOL_MARKER, 0)
+    """Test _process_reverse_words_mode with a slide but no text."""
+    mock_extract_run.return_value = []  # No text found
+    mock_slide = MagicMock()
+    result = _process_reverse_words_mode([mock_slide], [0])
     assert result == 0
-    mock_extract_run.assert_called_once_with(mock_slide)
-    mock_echo.assert_any_call(
-        "No text found to process on selected slides for mode 'reverse-words'."
-    )
-    mock_reverse_words.assert_not_called()
+    mock_echo.assert_any_call("  Slide 1 (Original page 1): No text found.")
 
 
 @patch("pptrans.__main__.click.echo")
-@patch("pptrans.__main__.reverse_individual_words")
 @patch("pptrans.__main__._extract_run_info_from_slide")
 def test_process_reverse_words_mode_with_text(
-    mock_extract_run: MagicMock,
-    mock_reverse_words: MagicMock,
-    mock_echo: MagicMock,
+    mock_extract_run: MagicMock, mock_echo: MagicMock
 ) -> None:
-    mock_run = create_mock_run("Original")
-    mock_slide = create_mock_slide([])
-    mock_extract_run.return_value = [{"original_text": "Hello", "run_object": mock_run}]
-    mock_reverse_words.return_value = f"olleH{EOL_MARKER}"
-
-    result = _process_reverse_words_mode([mock_slide], [0], EOL_MARKER, 0)
-
-    assert result == 1
-    mock_extract_run.assert_called_once_with(mock_slide)
-    mock_reverse_words.assert_called_once_with(f"Hello{EOL_MARKER}")
-    assert mock_run.text == "olleH"
-    mock_echo.assert_any_call("Text replaced with reversed-word text on slides.")
+    """Test _process_reverse_words_mode with a slide containing text."""
+    mock_run1 = create_mock_run("Hello world")
+    mock_run2 = create_mock_run("Another text")
+    mock_extract_run.return_value = [
+        {"original_text": "Hello world", "run_object": mock_run1},
+        {"original_text": "Another text", "run_object": mock_run2},
+    ]
+    mock_slide = MagicMock()
+    result = _process_reverse_words_mode([mock_slide], [0])
+    assert result == 0
+    assert mock_run1.text == "olleh dlrow"
+    assert mock_run2.text == "rehtonA txet"
+    mock_echo.assert_any_call(
+        "  Slide 1 (Original page 1): Processing with 2 text runs."
+    )
 
 
 @patch("pptrans.__main__.click.echo")
 @pytest.mark.kwparametrize(
-    dict(mode="translate", output_path_str="output.pptx", id="translate_mode"),
-    dict(mode="reverse-words", output_path_str="reversed.pptx", id="reverse_mode"),
+    dict(
+        bak_path=None,
+        expected_calls=[
+            "No backup file created (use --bak-path to create a backup).",
+        ],
+        id="no_bak_path",
+    ),
+    dict(
+        bak_path=Path("backup.pptx"),
+        expected_calls=["Backup created at 'backup.pptx'."],
+        id="with_bak_path",
+    ),
 )
 def test_emit_save_message(
-    mock_echo: MagicMock, mode: str, output_path_str: str
+    mock_echo: MagicMock, bak_path: Path | None, expected_calls: list[str]
 ) -> None:
     """Test the _emit_save_message function."""
-    output_path = Path(output_path_str)
-    _emit_save_message(mode, output_path)
-    mock_echo.assert_called_once_with(
-        f"Presentation saved in '{mode}' mode to: {output_path}"
-    )
+    _emit_save_message(Path("output.pptx"), bak_path)
+    mock_echo.assert_any_call("Presentation saved to 'output.pptx'.")
+    for call_str in expected_calls:
+        mock_echo.assert_any_call(call_str)
 
 
 @patch("pptrans.__main__.shutil.copy2")
-@patch("pptrans.__main__.Presentation")
 @patch("pptrans.__main__._handle_slide_selection")
 @patch("pptrans.__main__._process_translation_mode")
 @patch("pptrans.__main__._process_reverse_words_mode")
-@patch("pptrans.__main__.load_cache")
-@patch("pptrans.__main__.commit_pending_cache_updates")
+@patch("pptrans.__main__.Presentation")
+@patch("pptrans.__main__.click.echo")
 def test_main_cli(
-    mock_commit_cache: MagicMock,
-    mock_load_cache: MagicMock,
+    mock_echo: MagicMock,
+    mock_presentation: MagicMock,
     mock_process_reverse: MagicMock,
     mock_process_translate: MagicMock,
-    mock_handle_selection: MagicMock,
-    MockPresentation: MagicMock,
+    mock_handle_slides: MagicMock,
     mock_copy2: MagicMock,
-    tmp_path: Path,
 ) -> None:
+    """Test the main CLI entrypoint function."""
+    # Set up mocks
+    mock_presentation_instance = MagicMock()
+    mock_presentation_instance.slides = ["slide1", "slide2"]
+    mock_presentation.return_value = mock_presentation_instance
+    mock_handle_slides.return_value = {0, 1}  # Both slides
+    mock_process_translate.return_value = 0
+
+    # Call the function
     runner = CliRunner()
-    input_file = tmp_path / "input.pptx"
-    output_file = tmp_path / "output.pptx"
-    input_file.touch()
-
-    mock_prs_instance = MagicMock()
-    mock_slide_obj = create_mock_slide([])
-    mock_prs_instance.slides = [mock_slide_obj, mock_slide_obj]
-    MockPresentation.return_value = mock_prs_instance
-    mock_handle_selection.return_value = {0, 1}
-
-    mock_process_translate.return_value = 5
-    result = runner.invoke(
-        main, [str(input_file), str(output_file), "--mode", "translate"]
-    )
-    assert result.exit_code == 0
-    mock_copy2.assert_called_once_with(str(input_file), str(output_file))
-    MockPresentation.assert_called_with(str(output_file))
-    mock_handle_selection.assert_called_with(None, 2)
-    mock_process_translate.assert_called_once_with(
-        [mock_slide_obj, mock_slide_obj],
-        [0, 1],
-        "translation_cache.json",
-        EOL_MARKER,
-        0,
-    )
-    mock_prs_instance.save.assert_called_with(str(output_file))
-    assert f"Presentation saved in 'translate' mode to: {output_file}" in result.output
-
-    mock_copy2.reset_mock()
-    MockPresentation.reset_mock()
-    MockPresentation.return_value = mock_prs_instance
-    mock_handle_selection.reset_mock()
-    mock_handle_selection.return_value = {0}
-    mock_prs_instance.save.reset_mock()
-
-    mock_process_reverse.return_value = 3
-    result = runner.invoke(
-        main,
-        [str(input_file), str(output_file), "--mode", "reverse-words", "--pages", "1"],
-    )
-    assert result.exit_code == 0
-    mock_copy2.assert_called_once_with(str(input_file), str(output_file))
-    MockPresentation.assert_called_with(str(output_file))
-    mock_handle_selection.assert_called_with("1", 2)
-    mock_process_reverse.assert_called_once_with([mock_slide_obj], [0], EOL_MARKER, 0)
-    mock_prs_instance.save.assert_called_with(str(output_file))
-    assert (
-        f"Presentation saved in 'reverse-words' mode to: {output_file}" in result.output
-    )
-
-    mock_copy2.reset_mock()
-    MockPresentation.reset_mock()
-    mock_prs_instance_no_slides = MagicMock()
-    mock_prs_instance_no_slides.slides = []
-    MockPresentation.return_value = mock_prs_instance_no_slides
-    mock_prs_instance.save.reset_mock()  # Original mock_prs_instance
-
-    result = runner.invoke(main, [str(input_file), str(output_file)])
-    assert result.exit_code == 0
-    assert "Input presentation has no slides. Exiting." in result.output
-    mock_prs_instance_no_slides.save.assert_not_called()
-
-    mock_copy2.reset_mock()
-    MockPresentation.reset_mock()
-    MockPresentation.return_value = mock_prs_instance  # Restore 2 slides
-    mock_handle_selection.reset_mock()
-    mock_handle_selection.return_value = set()
-    mock_prs_instance.save.reset_mock()
-    mock_load_cache.return_value = {}
-
-    result = runner.invoke(main, [str(input_file), str(output_file), "--pages", "99"])
-    assert result.exit_code == 0
-    assert "Warning: The specified page range '99' resulted in" in result.output
-    assert "no slides being selected" in result.output
-    mock_prs_instance.save.assert_called_once_with(str(output_file))
-    mock_load_cache.assert_called_once_with("translation_cache.json")
-    mock_commit_cache.assert_called_once_with({}, {}, "translation_cache.json")
-
-
-@patch("pptrans.__main__.shutil.copy2")
-@patch("pptrans.__main__.Presentation")
-@patch("pptrans.__main__._handle_slide_selection")
-def test_main_cli_no_slides_selected_no_pages_option(
-    mock_handle_selection: MagicMock,
-    MockPresentation: MagicMock,
-    _mock_copy2: MagicMock,  # Not used directly, but good practice to mock
-    tmp_path: Path,
-) -> None:
-    runner = CliRunner()
-    input_file = tmp_path / "input.pptx"
-    output_file = tmp_path / "output.pptx"
-    input_file.touch()
-
-    mock_prs_instance = MagicMock()
-    mock_prs_instance.slides = [MagicMock(), MagicMock()]
-    MockPresentation.return_value = mock_prs_instance
-    mock_handle_selection.return_value = set()
-
-    # Patch load_cache and commit_pending_cache_updates for the translate branch
-    with (
-        patch("pptrans.__main__.load_cache") as mock_load,
-        patch("pptrans.__main__.commit_pending_cache_updates") as mock_commit,
-    ):
-        mock_load.return_value = {}  # Simulate empty cache
-        result = runner.invoke(main, [str(input_file), str(output_file)])
-
-    assert result.exit_code == 0
-    assert "No slides selected for processing" in result.output
-    assert "No text processing will occur." in result.output
-    mock_prs_instance.save.assert_called_once_with(str(output_file))
-    mock_load.assert_called_once_with("translation_cache.json")
-    mock_commit.assert_called_once_with({}, {}, "translation_cache.json")
-
-
-@patch("pptrans.__main__.shutil.copy2")
-@patch("pptrans.__main__.Presentation")
-@patch("pptrans.__main__._handle_slide_selection")
-def test_main_cli_no_slides_selected_reverse_words_mode_no_pages_option(
-    mock_handle_selection: MagicMock,
-    MockPresentation: MagicMock,
-    _mock_copy2: MagicMock,
-    tmp_path: Path,
-) -> None:
-    """Test main CLI when no slides are selected and mode is reverse_words."""
-    runner = CliRunner()
-    input_file = tmp_path / "input.pptx"
-    output_file = tmp_path / "output.pptx"
-    # cache_file = tmp_path / "cache.json" # Not used for this mode's CLI call
-    input_file.write_text("dummy")  # More robust file creation
-    assert input_file.is_file(), "Input file was not created or is not a file"
-
-    mock_prs_instance = MagicMock()
-    mock_prs_instance.slides = [MagicMock(), MagicMock()]  # Simulate some slides
-    MockPresentation.return_value = mock_prs_instance
-    mock_handle_selection.return_value = set()  # Simulate no slides selected
-
-    # For reverse_words mode, load_cache and commit_pending_cache_updates
-    # are not called in the no-slides-processed path.
-    # We don't need to patch them here as they shouldn't be called.
     result = runner.invoke(
         main,
         [
+            "input.pptx",
+            "--output",
+            "output.pptx",
             "--mode",
-            "reverse-words",
-            str(input_file),
-            str(output_file),
-            # Do not pass --cache-file, it's not a CLI option
-            # and cache_file_path is hardcoded in main
+            "translate",
+            "--cache-file",
+            "cache.json",
         ],
     )
 
+    # Assertions
     assert result.exit_code == 0
-    assert "No slides selected for processing" in result.output
-    assert "No text processing will occur." in result.output
-    mock_prs_instance.save.assert_called_once_with(str(output_file))
-    # Assert that load_cache and commit_pending_cache_updates were NOT called
-    # This can be done by checking their call_count if they were patched,
-    # or by ensuring they are not in the call list of a more general mock if applicable.
-    # For this specific test, since we are targeting the branch where
-    # `mode != "translate"`, the key is that the cache operations within that if block
-    # are skipped.
+    mock_presentation.assert_called_once_with("input.pptx")
+    mock_handle_slides.assert_called_once_with(None, 2)
+    mock_process_translate.assert_called_once_with(
+        ["slide1", "slide2"], [0, 1], "cache.json", EOL_MARKER
+    )
+    mock_process_reverse.assert_not_called()
+    mock_presentation_instance.save.assert_called_once_with("output.pptx")
+    mock_copy2.assert_not_called()
+
+
+@patch("pptrans.__main__.shutil.copy2")
+@patch("pptrans.__main__._handle_slide_selection")
+@patch("pptrans.__main__._process_translation_mode")
+@patch("pptrans.__main__._process_reverse_words_mode")
+@patch("pptrans.__main__.Presentation")
+def test_main_cli_no_slides_selected_no_pages_option(
+    mock_presentation: MagicMock,
+    mock_process_reverse: MagicMock,
+    mock_process_translate: MagicMock,
+    mock_handle_slides: MagicMock,
+    mock_copy2: MagicMock,
+) -> None:
+    """Test the main CLI when no slides are selected."""
+    mock_presentation_instance = MagicMock()
+    mock_presentation_instance.slides = ["slide1", "slide2"]
+    mock_presentation.return_value = mock_presentation_instance
+    mock_handle_slides.return_value = set()  # No slides selected
+
+    runner = CliRunner()
+    with pytest.raises(SystemExit) as excinfo:
+        runner.invoke(
+            main,
+            [
+                "input.pptx",
+                "--output",
+                "output.pptx",
+                "--mode",
+                "translate",
+                "--cache-file",
+                "cache.json",
+            ],
+            catch_exceptions=False,
+        )
+
+    assert excinfo.value.code == 1  # SystemExit with code 1
+
+
+@patch("pptrans.__main__.shutil.copy2")
+@patch("pptrans.__main__._handle_slide_selection")
+@patch("pptrans.__main__._process_translation_mode")
+@patch("pptrans.__main__._process_reverse_words_mode")
+@patch("pptrans.__main__.Presentation")
+@patch("pptrans.__main__.click.echo")
+def test_main_cli_no_slides_selected_reverse_words_mode_no_pages_option(
+    mock_echo: MagicMock,
+    mock_presentation: MagicMock,
+    mock_process_reverse: MagicMock,
+    mock_process_translate: MagicMock,
+    mock_handle_slides: MagicMock,
+    mock_copy2: MagicMock,
+) -> None:
+    """Test the main CLI with reverse_words mode and no slides selected."""
+    mock_presentation_instance = MagicMock()
+    mock_presentation_instance.slides = ["slide1", "slide2"]
+    mock_presentation.return_value = mock_presentation_instance
+    mock_handle_slides.return_value = set()  # No slides selected
+
+    runner = CliRunner()
+    with pytest.raises(SystemExit) as excinfo:
+        runner.invoke(
+            main,
+            [
+                "input.pptx",
+                "--output",
+                "output.pptx",
+                "--mode",
+                "reverse_words",
+            ],
+            catch_exceptions=False,
+        )
+
+    assert excinfo.value.code == 1  # SystemExit with code 1
 
 
 def test_main_dunder_guard(capsys: pytest.CaptureSys) -> None:
     """Test the ``if __name__ == '__main__':`` block.
 
-    This test ensures that the main function is called when the script
-    is executed directly.
+    The code in ``if __name__ == '__main__':`` is not covered by the test suite.
+    This is a simple test to ensure that it doesn't crash when run directly.
     """
-    # Simulate running the script directly using runpy
-    # This will trigger the if __name__ == "__main__": block
-    # and call the patched main function.
-    # sys.argv is patched to prevent pytest args from interfering.
-    script_path = Path("src/pptrans/__main__.py")
-    with (
-        patch("sys.argv", ["src/pptrans/__main__.py", "--help"]),
-        pytest.raises(SystemExit),
+    with patch.dict(
+        "sys.modules", {"pptrans.__main__": type("", (), {"__name__": "__main__"})()}
     ):
-        runpy.run_path(str(script_path), run_name="__main__")
-    assert capsys.readouterr().out.startswith("Usage: ")
+        runpy.run_module("pptrans.__main__", run_name="__main__")

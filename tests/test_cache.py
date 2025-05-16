@@ -237,6 +237,7 @@ _EOL = "[EOL]"
 @pytest.mark.kwparametrize(
     dict(
         slide_run_info_texts=["text1", "text2"],
+        shape_positions=[(100, 200), (300, 400)],
         page_hash=_PH1,
         translation_cache_content={
             _PH1: [
@@ -244,11 +245,9 @@ _EOL = "[EOL]"
                 {"original_text": "text2", "translation": "trans2"},
             ]
         },
-        initial_text_id_counter=10,
         page_number=1,
         expected_texts_for_llm_count=0,
         expected_processed_runs_count=2,
-        expected_final_text_id_counter=10,
         expected_page_requires_llm=False,
         expected_cache_hits_in_processed=2,
         expected_llm_sends_in_processed=0,
@@ -260,6 +259,7 @@ _EOL = "[EOL]"
     ),
     dict(
         slide_run_info_texts=["text1", "text_new", "text2"],
+        shape_positions=[(100, 200), (300, 400), (500, 600)],
         page_hash=_PH1,
         translation_cache_content={
             _PH1: [
@@ -267,11 +267,9 @@ _EOL = "[EOL]"
                 {"original_text": "text2", "translation": "trans2"},
             ]
         },
-        initial_text_id_counter=20,
         page_number=1,
         expected_texts_for_llm_count=1,
         expected_processed_runs_count=3,
-        expected_final_text_id_counter=21,
         expected_page_requires_llm=True,
         expected_cache_hits_in_processed=2,
         expected_llm_sends_in_processed=1,
@@ -284,15 +282,14 @@ _EOL = "[EOL]"
     ),
     dict(
         slide_run_info_texts=["text_new1", "text_new2"],
+        shape_positions=[(700, 800), (900, 1000)],
         page_hash=_PH2,
         translation_cache_content={
             _PH1: [{"original_text": "text1", "translation": "trans1"}]
         },  # Different hash
-        initial_text_id_counter=30,
         page_number=2,
         expected_texts_for_llm_count=2,
         expected_processed_runs_count=2,
-        expected_final_text_id_counter=32,
         expected_page_requires_llm=True,
         expected_cache_hits_in_processed=0,
         expected_llm_sends_in_processed=2,
@@ -303,13 +300,12 @@ _EOL = "[EOL]"
     ),
     dict(
         slide_run_info_texts=[],
+        shape_positions=[],
         page_hash="empty_hash",
         translation_cache_content={},
-        initial_text_id_counter=40,
         page_number=3,
         expected_texts_for_llm_count=0,
         expected_processed_runs_count=0,
-        expected_final_text_id_counter=40,
         expected_page_requires_llm=False,
         expected_cache_hits_in_processed=0,
         expected_llm_sends_in_processed=0,
@@ -317,15 +313,14 @@ _EOL = "[EOL]"
     ),
     dict(
         slide_run_info_texts=["text_other"],
+        shape_positions=[(1100, 1200)],
         page_hash=_PH1,
         translation_cache_content={  # Hash matches, text doesn't
             _PH1: [{"original_text": "text1", "translation": "trans1"}]
         },
-        initial_text_id_counter=50,
         page_number=1,
         expected_texts_for_llm_count=1,
         expected_processed_runs_count=1,
-        expected_final_text_id_counter=51,
         expected_page_requires_llm=True,
         expected_cache_hits_in_processed=0,
         expected_llm_sends_in_processed=1,
@@ -346,14 +341,13 @@ _EOL = "[EOL]"
 def test_prepare_slide_for_translation(
     mocker: Callable,
     slide_run_info_texts: list[str],
+    shape_positions: list[tuple[int, int]],
     page_hash: str,
     translation_cache_content: dict[str, list[dict[str, str]]],
-    initial_text_id_counter: int,
     eol_marker: str,  # Will take default from kwparametrize
     page_number: int,
     expected_texts_for_llm_count: int,
     expected_processed_runs_count: int,
-    expected_final_text_id_counter: int,
     expected_page_requires_llm: bool,
     expected_cache_hits_in_processed: int,
     expected_llm_sends_in_processed: int,
@@ -361,28 +355,34 @@ def test_prepare_slide_for_translation(
 ) -> None:
     """Test preparing slide text runs for translation."""
     mock_echo = mocker.patch("pptrans.cache.click.echo")
-    slide_run_info = [
-        {"original_text": text, "run_object": MockRun(text)}
-        for text in slide_run_info_texts
-    ]
+    slide_run_info = []
+
+    for i, (text, position) in enumerate(zip(slide_run_info_texts, shape_positions)):
+        slide_run_info.append(
+            {
+                "original_text": text,
+                "run_object": MockRun(text),
+                "shape_idx": i // 2,  # Each shape can have multiple runs
+                "run_idx_in_shape": i % 2,
+                "shape_x": position[0],
+                "shape_y": position[1],
+            }
+        )
 
     (
         texts_for_llm,
         processed_runs,
-        final_text_id_counter,
         page_requires_llm,
     ) = prepare_slide_for_translation(
         slide_run_info,
         page_hash,
         translation_cache_content.copy(),  # Ensure original is not modified
-        initial_text_id_counter,
         eol_marker,
         page_number,
     )
 
     assert len(texts_for_llm) == expected_texts_for_llm_count
     assert len(processed_runs) == expected_processed_runs_count
-    assert final_text_id_counter == expected_final_text_id_counter
     assert page_requires_llm == expected_page_requires_llm
 
     actual_cache_hits = sum(1 for run in processed_runs if run["from_cache"])
@@ -391,8 +391,6 @@ def test_prepare_slide_for_translation(
     assert actual_llm_sends == expected_llm_sends_in_processed
 
     if page_requires_llm and slide_run_info_texts:
-        current_id_offset = 0
-        llm_item_idx = 0
         for i, run_detail_info in enumerate(slide_run_info):
             original_text = run_detail_info["original_text"]
             processed_run_entry = processed_runs[i]
@@ -415,19 +413,23 @@ def test_prepare_slide_for_translation(
             if not is_cached_in_input:  # Should be sent to LLM
                 assert processed_run_entry["from_cache"] is False
                 assert processed_run_entry["final_translation"] is None
-                expected_llm_id = (
-                    f"pg{page_number}_txt{initial_text_id_counter + current_id_offset}"
-                )
+                shape_idx = run_detail_info["shape_idx"]
+                run_idx = run_detail_info["run_idx_in_shape"]
+                expected_llm_id = f"pg{page_number},el{shape_idx},run{run_idx}"
                 assert processed_run_entry["llm_id"] == expected_llm_id
 
-                llm_entry = texts_for_llm[llm_item_idx]
-                assert llm_entry["id"] == expected_llm_id
+                # Find the corresponding entry in texts_for_llm
+                llm_entry = next(
+                    entry for entry in texts_for_llm if entry["id"] == expected_llm_id
+                )
                 assert llm_entry["original_text_for_cache"] == original_text
                 assert llm_entry["text_to_send"] == original_text + eol_marker
                 assert llm_entry["run_object"] == run_detail_info["run_object"]
                 assert llm_entry["page_hash"] == page_hash
-                current_id_offset += 1
-                llm_item_idx += 1
+                assert llm_entry["shape_x"] == run_detail_info["shape_x"]
+                assert llm_entry["shape_y"] == run_detail_info["shape_y"]
+                assert isinstance(llm_entry["shape_x"], int)
+                assert isinstance(llm_entry["shape_y"], int)
 
     all_echo_output = " ".join(
         call_args[0][0] for call_args in mock_echo.call_args_list
@@ -439,9 +441,9 @@ def test_prepare_slide_for_translation(
 
 
 # --- Tests for update_data_from_llm_response ---
-_PG1_TXT1_ID = "pg1_txt1"
-_PG1_TXT2_ID = "pg1_txt2"
-_PG2_TXT1_ID = "pg2_txt1"
+_PG1_EL0_RUN0 = "pg1,el0,run0"
+_PG1_EL1_RUN0 = "pg1,el1,run0"
+_PG2_EL0_RUN0 = "pg2,el0,run0"
 _HASH1 = "hash_page1"
 _HASH2 = "hash_page2"
 _EOL_MARKER_DEFAULT = "[EOL_DEFAULT]"
@@ -451,30 +453,34 @@ _EOL_MARKER_DEFAULT = "[EOL_DEFAULT]"
     # Case 1: valid_update
     dict(
         llm_response_lines_in=[
-            f"{_PG1_TXT1_ID}:Translated Text 1{_EOL_MARKER_DEFAULT}",
-            f" {_PG1_TXT2_ID} : Translated Text 2 {_EOL_MARKER_DEFAULT} ",
+            f"{_PG1_EL0_RUN0}:Translated Text 1{_EOL_MARKER_DEFAULT}",
+            f" {_PG1_EL1_RUN0} : Translated Text 2 {_EOL_MARKER_DEFAULT} ",
         ],
         global_texts_for_llm_prompt_in=[
             {
-                "id": _PG1_TXT1_ID,
+                "id": _PG1_EL0_RUN0,
                 "original_text_for_cache": "Orig1",
                 "page_hash": _HASH1,
+                "shape_x": 100,
+                "shape_y": 200,
             },
             {
-                "id": _PG1_TXT2_ID,
+                "id": _PG1_EL1_RUN0,
                 "original_text_for_cache": "Orig2",
                 "page_hash": _HASH1,
+                "shape_x": 300,
+                "shape_y": 400,
             },
         ],
         all_processed_run_details_in=[
-            {"llm_id": _PG1_TXT1_ID, "final_translation": None},
-            {"llm_id": _PG1_TXT2_ID, "final_translation": None},
+            {"llm_id": _PG1_EL0_RUN0, "final_translation": None},
+            {"llm_id": _PG1_EL1_RUN0, "final_translation": None},
             {"llm_id": "other_id", "final_translation": "stay"},
         ],
         pending_page_cache_updates_in={_HASH1: []},
         expected_all_processed_run_details_after=[
-            {"llm_id": _PG1_TXT1_ID, "final_translation": "Translated Text 1"},
-            {"llm_id": _PG1_TXT2_ID, "final_translation": " Translated Text 2 "},
+            {"llm_id": _PG1_EL0_RUN0, "final_translation": "Translated Text 1"},
+            {"llm_id": _PG1_EL1_RUN0, "final_translation": " Translated Text 2 "},
             {"llm_id": "other_id", "final_translation": "stay"},
         ],
         expected_pending_page_cache_updates_after={
@@ -490,17 +496,19 @@ _EOL_MARKER_DEFAULT = "[EOL_DEFAULT]"
         llm_response_lines_in=["unknown_id:Translation for unknown"],
         global_texts_for_llm_prompt_in=[
             {
-                "id": _PG1_TXT1_ID,
+                "id": _PG1_EL0_RUN0,
                 "original_text_for_cache": "Orig1",
                 "page_hash": _HASH1,
+                "shape_x": 100,
+                "shape_y": 200,
             }
         ],
         all_processed_run_details_in=[
-            {"llm_id": _PG1_TXT1_ID, "final_translation": None}
+            {"llm_id": _PG1_EL0_RUN0, "final_translation": None}
         ],
         pending_page_cache_updates_in={_HASH1: []},
         expected_all_processed_run_details_after=[
-            {"llm_id": _PG1_TXT1_ID, "final_translation": None}
+            {"llm_id": _PG1_EL0_RUN0, "final_translation": None}
         ],
         expected_pending_page_cache_updates_after={_HASH1: []},
         expected_echo_warnings=["Could not find original data for ID unknown_id"],
@@ -510,17 +518,19 @@ _EOL_MARKER_DEFAULT = "[EOL_DEFAULT]"
         llm_response_lines_in=["this is a malformed line"],
         global_texts_for_llm_prompt_in=[
             {
-                "id": _PG1_TXT1_ID,
+                "id": _PG1_EL0_RUN0,
                 "original_text_for_cache": "Orig1",
                 "page_hash": _HASH1,
+                "shape_x": 100,
+                "shape_y": 200,
             }
         ],
         all_processed_run_details_in=[
-            {"llm_id": _PG1_TXT1_ID, "final_translation": None}
+            {"llm_id": _PG1_EL0_RUN0, "final_translation": None}
         ],
         pending_page_cache_updates_in={_HASH1: []},
         expected_all_processed_run_details_after=[
-            {"llm_id": _PG1_TXT1_ID, "final_translation": None}
+            {"llm_id": _PG1_EL0_RUN0, "final_translation": None}
         ],
         expected_pending_page_cache_updates_after={_HASH1: []},
         expected_echo_warnings=[
@@ -532,11 +542,11 @@ _EOL_MARKER_DEFAULT = "[EOL_DEFAULT]"
         llm_response_lines_in=[],
         global_texts_for_llm_prompt_in=[],
         all_processed_run_details_in=[
-            {"llm_id": _PG1_TXT1_ID, "final_translation": "no change"}
+            {"llm_id": _PG1_EL0_RUN0, "final_translation": "no change"}
         ],
         pending_page_cache_updates_in={},
         expected_all_processed_run_details_after=[
-            {"llm_id": _PG1_TXT1_ID, "final_translation": "no change"}
+            {"llm_id": _PG1_EL0_RUN0, "final_translation": "no change"}
         ],
         expected_pending_page_cache_updates_after={},
         expected_echo_warnings=[],
@@ -544,21 +554,23 @@ _EOL_MARKER_DEFAULT = "[EOL_DEFAULT]"
     # Case 5: page_hash_not_in_pending_initially
     dict(
         llm_response_lines_in=[
-            f"{_PG2_TXT1_ID}:Translated for new hash{_EOL_MARKER_DEFAULT}"
+            f"{_PG2_EL0_RUN0}:Translated for new hash{_EOL_MARKER_DEFAULT}"
         ],
         global_texts_for_llm_prompt_in=[
             {
-                "id": _PG2_TXT1_ID,
+                "id": _PG2_EL0_RUN0,
                 "original_text_for_cache": "OrigNewHash",
                 "page_hash": _HASH2,
+                "shape_x": 100,
+                "shape_y": 200,
             }
         ],
         all_processed_run_details_in=[
-            {"llm_id": _PG2_TXT1_ID, "final_translation": None}
+            {"llm_id": _PG2_EL0_RUN0, "final_translation": None}
         ],
         pending_page_cache_updates_in={},  # pending is empty
         expected_all_processed_run_details_after=[
-            {"llm_id": _PG2_TXT1_ID, "final_translation": "Translated for new hash"}
+            {"llm_id": _PG2_EL0_RUN0, "final_translation": "Translated for new hash"}
         ],
         expected_pending_page_cache_updates_after={
             _HASH2: [
@@ -573,23 +585,25 @@ _EOL_MARKER_DEFAULT = "[EOL_DEFAULT]"
     # Case 6: update_existing_in_pending
     dict(
         llm_response_lines_in=[
-            f"{_PG1_TXT1_ID}:Updated Translation 1{_EOL_MARKER_DEFAULT}"
+            f"{_PG1_EL0_RUN0}:Updated Translation 1{_EOL_MARKER_DEFAULT}"
         ],
         global_texts_for_llm_prompt_in=[
             {
-                "id": _PG1_TXT1_ID,
+                "id": _PG1_EL0_RUN0,
                 "original_text_for_cache": "Orig1",
                 "page_hash": _HASH1,
+                "shape_x": 100,
+                "shape_y": 200,
             }
         ],
         all_processed_run_details_in=[
-            {"llm_id": _PG1_TXT1_ID, "final_translation": None}
+            {"llm_id": _PG1_EL0_RUN0, "final_translation": None}
         ],
         pending_page_cache_updates_in={
             _HASH1: [{"original_text": "Orig1", "translation": "Old Translation 1"}]
         },
         expected_all_processed_run_details_after=[
-            {"llm_id": _PG1_TXT1_ID, "final_translation": "Updated Translation 1"}
+            {"llm_id": _PG1_EL0_RUN0, "final_translation": "Updated Translation 1"}
         ],
         expected_pending_page_cache_updates_after={
             _HASH1: [{"original_text": "Orig1", "translation": "Updated Translation 1"}]
@@ -600,21 +614,23 @@ _EOL_MARKER_DEFAULT = "[EOL_DEFAULT]"
     #         (already covered by valid_update, but explicit)
     dict(
         llm_response_lines_in=[
-            f"{_PG1_TXT1_ID}:Translated Text With EOL{_EOL_MARKER_DEFAULT}"
+            f"{_PG1_EL0_RUN0}:Translated Text With EOL{_EOL_MARKER_DEFAULT}"
         ],
         global_texts_for_llm_prompt_in=[
             {
-                "id": _PG1_TXT1_ID,
+                "id": _PG1_EL0_RUN0,
                 "original_text_for_cache": "Orig1",
                 "page_hash": _HASH1,
+                "shape_x": 100,
+                "shape_y": 200,
             }
         ],
         all_processed_run_details_in=[
-            {"llm_id": _PG1_TXT1_ID, "final_translation": None}
+            {"llm_id": _PG1_EL0_RUN0, "final_translation": None}
         ],
         pending_page_cache_updates_in={_HASH1: []},
         expected_all_processed_run_details_after=[
-            {"llm_id": _PG1_TXT1_ID, "final_translation": "Translated Text With EOL"}
+            {"llm_id": _PG1_EL0_RUN0, "final_translation": "Translated Text With EOL"}
         ],
         expected_pending_page_cache_updates_after={
             _HASH1: [
@@ -625,20 +641,25 @@ _EOL_MARKER_DEFAULT = "[EOL_DEFAULT]"
     ),
     # Case 8: llm_response_without_eol_marker_at_end
     dict(
-        llm_response_lines_in=[f"{_PG1_TXT1_ID}:Translated Text Without EOL"],
+        llm_response_lines_in=[f"{_PG1_EL0_RUN0}:Translated Text Without EOL"],
         global_texts_for_llm_prompt_in=[
             {
-                "id": _PG1_TXT1_ID,
+                "id": _PG1_EL0_RUN0,
                 "original_text_for_cache": "Orig1",
                 "page_hash": _HASH1,
+                "shape_x": 100,
+                "shape_y": 200,
             }
         ],
         all_processed_run_details_in=[
-            {"llm_id": _PG1_TXT1_ID, "final_translation": None}
+            {"llm_id": _PG1_EL0_RUN0, "final_translation": None}
         ],
         pending_page_cache_updates_in={_HASH1: []},
         expected_all_processed_run_details_after=[
-            {"llm_id": _PG1_TXT1_ID, "final_translation": "Translated Text Without EOL"}
+            {
+                "llm_id": _PG1_EL0_RUN0,
+                "final_translation": "Translated Text Without EOL",
+            }
         ],
         expected_pending_page_cache_updates_after={
             _HASH1: [
@@ -650,31 +671,35 @@ _EOL_MARKER_DEFAULT = "[EOL_DEFAULT]"
     # Case 9: general_exception_during_parsing
     dict(
         llm_response_lines_in=[
-            f"{_PG1_TXT1_ID}:"
+            f"{_PG1_EL0_RUN0}:"
             f"Translated Text 1{_EOL_MARKER_DEFAULT}",  # This will be mocked to fail
-            "pgX_txtY:Normal Text",
+            "pgX,elY,runZ:Normal Text",
         ],
         global_texts_for_llm_prompt_in=[
             {
-                "id": _PG1_TXT1_ID,
+                "id": _PG1_EL0_RUN0,
                 # "original_text_for_cache": "Orig1", # Intentionally missing key
                 "page_hash": _HASH1,
+                "shape_x": 100,
+                "shape_y": 200,
             },
             {
-                "id": "pgX_txtY",
+                "id": "pgX,elY,runZ",
                 "original_text_for_cache": "OrigX",
                 "page_hash": "hashX",
+                "shape_x": 500,
+                "shape_y": 600,
             },
         ],
         all_processed_run_details_in=[
-            {"llm_id": _PG1_TXT1_ID, "final_translation": None},
-            {"llm_id": "pgX_txtY", "final_translation": None},
+            {"llm_id": _PG1_EL0_RUN0, "final_translation": None},
+            {"llm_id": "pgX,elY,runZ", "final_translation": None},
         ],
         pending_page_cache_updates_in={_HASH1: [], "hashX": []},
         expected_all_processed_run_details_after=[
-            {"llm_id": _PG1_TXT1_ID, "final_translation": None},  # Failed line
+            {"llm_id": _PG1_EL0_RUN0, "final_translation": None},  # Failed line
             {
-                "llm_id": "pgX_txtY",
+                "llm_id": "pgX,elY,runZ",
                 "final_translation": "Normal Text",
             },  # Successful line
         ],
@@ -693,22 +718,24 @@ _EOL_MARKER_DEFAULT = "[EOL_DEFAULT]"
     dict(
         llm_response_lines_in=[
             "",
-            f"{_PG1_TXT1_ID}:Translated Text 1{_EOL_MARKER_DEFAULT}",
+            f"{_PG1_EL0_RUN0}:Translated Text 1{_EOL_MARKER_DEFAULT}",
             "   ",
         ],
         global_texts_for_llm_prompt_in=[
             {
-                "id": _PG1_TXT1_ID,
+                "id": _PG1_EL0_RUN0,
                 "original_text_for_cache": "Orig1",
                 "page_hash": _HASH1,
+                "shape_x": 100,
+                "shape_y": 200,
             }
         ],
         all_processed_run_details_in=[
-            {"llm_id": _PG1_TXT1_ID, "final_translation": None}
+            {"llm_id": _PG1_EL0_RUN0, "final_translation": None}
         ],
         pending_page_cache_updates_in={_HASH1: []},
         expected_all_processed_run_details_after=[
-            {"llm_id": _PG1_TXT1_ID, "final_translation": "Translated Text 1"}
+            {"llm_id": _PG1_EL0_RUN0, "final_translation": "Translated Text 1"}
         ],
         expected_pending_page_cache_updates_after={
             _HASH1: [{"original_text": "Orig1", "translation": "Translated Text 1"}]
@@ -722,26 +749,28 @@ _EOL_MARKER_DEFAULT = "[EOL_DEFAULT]"
     # and cover branch 225->232 in _process_llm_output_for_page_cache
     dict(
         llm_response_lines_in=[
-            f"{_PG2_TXT1_ID}:Translated Text For Unmatched Page{_EOL_MARKER_DEFAULT}",
+            f"{_PG2_EL0_RUN0}:Translated Text For Unmatched Page{_EOL_MARKER_DEFAULT}",
         ],
         global_texts_for_llm_prompt_in=[
             {  # This entry provides the parsed_text_id and current_page_hash
-                "id": _PG2_TXT1_ID,
+                "id": _PG2_EL0_RUN0,
                 "original_text_for_cache": "OrigUnmatchedPage",
                 # This hash will not be in pending_page_cache_updates_in:
                 "page_hash": _HASH2,
+                "shape_x": 100,
+                "shape_y": 200,
             }
         ],
         all_processed_run_details_in=[
-            # _PG2_TXT1_ID is NOT in this list, so the loop in
+            # _PG2_EL0_RUN0 is NOT in this list, so the loop in
             # _process_llm_output_for_page_cache will complete without finding it.
-            {"llm_id": _PG1_TXT1_ID, "final_translation": "Existing translation"},
+            {"llm_id": _PG1_EL0_RUN0, "final_translation": "Existing translation"},
         ],
         # _HASH2 is NOT in pending_page_cache_updates_in
         pending_page_cache_updates_in={_HASH1: []},
         expected_all_processed_run_details_after=[
-            # Should remain unchanged as _PG2_TXT1_ID was not processed for update here
-            {"llm_id": _PG1_TXT1_ID, "final_translation": "Existing translation"},
+            # Should remain unchanged as _PG2_EL0_RUN0 was not processed for update here
+            {"llm_id": _PG1_EL0_RUN0, "final_translation": "Existing translation"},
         ],
         expected_pending_page_cache_updates_after={
             _HASH1: [],  # This hash remains as it was
@@ -864,135 +893,67 @@ _H_EMPTY_COVERAGE = "hash_empty_for_coverage_commit"  # For 303->296 coverage
             _H1_COMMIT: [{"original_text": "orig1", "translation": "trans1"}]
         },
         pending_updates={
-            _H1_COMMIT: [],  # First item: Existing hash, empty list
-            # Second item: New hash:
-            _H2_COMMIT: [{"original_text": "orig2", "translation": "trans2"}],
+            _H1_COMMIT: [
+                {"original_text": "orig1", "translation": "trans1"}
+            ]  # No change
         },
         expected_final_cache_content={
-            _H1_COMMIT: [],  # Gets cleared
-            # Gets added:
-            _H2_COMMIT: [{"original_text": "orig2", "translation": "trans2"}],
+            _H1_COMMIT: [{"original_text": "orig1", "translation": "trans1"}]
         },
         expected_echo_substrings=[
-            f"Cleared translations for existing page_hash: {_H1_COMMIT[:8]}",
-            f"Updated cache for page_hash: {_H2_COMMIT[:8]}",
+            f"Updated cache for page_hash: {_H1_COMMIT[:8]}",
         ],
-    ),
-    dict(
-        initial_translation_cache={
-            _H1_COMMIT: [{"original_text": "orig1", "translation": "trans1"}]
-        },
-        pending_updates={},  # Empty pending
-        expected_final_cache_content={
-            _H1_COMMIT: [{"original_text": "orig1", "translation": "trans1"}]
-        },
-        expected_echo_substrings=[
-            "Updating and preparing to save"
-        ],  # No specific item updates
     ),
     dict(
         initial_translation_cache={},
-        pending_updates={
-            _H3_COMMIT: [{"original_text": "orig3", "translation": "trans3"}]
-        },
-        expected_final_cache_content={
-            _H3_COMMIT: [{"original_text": "orig3", "translation": "trans3"}]
-        },
-        expected_echo_substrings=[f"Updated cache for page_hash: {_H3_COMMIT[:8]}"],
+        pending_updates={_H_EMPTY_COVERAGE: []},  # Empty list for a new hash
+        expected_final_cache_content={},  # Should not add empty hash
+        expected_echo_substrings=[],
     ),
-    # Case: Single pending update with an empty list for a new hash.
-    # This is to ensure branch 303->(else) in commit_pending_cache_updates is covered
-    # (specifically, where page_hash is new and translations_list is empty).
-    # The elif not translations_list: is hit, and page_hash is not in
-    # translation_cache_ref.
-    dict(
-        initial_translation_cache={"existing_hash": [{"ot": "o", "tt": "t"}]},
-        pending_updates={_H_EMPTY_COVERAGE: []},
-        expected_final_cache_content={
-            "existing_hash": [{"ot": "o", "tt": "t"}]
-        },  # _H_EMPTY_COVERAGE not added
-        expected_echo_substrings=[],  # No update message for _H_EMPTY_COVERAGE
-    ),
-    # Case: Existing hash with empty list, followed by a valid item
-    # Ensures loop continues after clearing an existing item.
-    dict(
-        initial_translation_cache={
-            _H1_COMMIT: [{"original_text": "orig1", "translation": "trans1"}]
-        },
-        pending_updates={
-            _H1_COMMIT: [],  # Existing hash, empty list
-            # New hash, valid item:
-            _H2_COMMIT: [{"original_text": "orig2", "translation": "trans2"}],
-        },
-        expected_final_cache_content={
-            _H1_COMMIT: [],  # Gets cleared
-            # Gets added:
-            _H2_COMMIT: [{"original_text": "orig2", "translation": "trans2"}],
-        },
-        expected_echo_substrings=[
-            f"Cleared translations for existing page_hash: {_H1_COMMIT[:8]}",
-            f"Updated cache for page_hash: {_H2_COMMIT[:8]}",
-        ],
-    ),
-    # Case: New hash with empty list, followed by a valid item
-    # Ensures loop continues after ignoring a new empty item.
-    dict(
-        initial_translation_cache={
-            _H1_COMMIT: [{"original_text": "orig1", "translation": "trans1"}]
-        },
-        pending_updates={
-            _H_EMPTY_COVERAGE: [],  # New hash, empty list (ignored)
-            # New hash, valid item:
-            _H2_COMMIT: [{"original_text": "orig2", "translation": "trans2"}],
-        },
-        expected_final_cache_content={
-            # Unchanged:
-            _H1_COMMIT: [{"original_text": "orig1", "translation": "trans1"}],
-            # Gets added:
-            _H2_COMMIT: [{"original_text": "orig2", "translation": "trans2"}],
-        },
-        expected_echo_substrings=[
-            # No echo for _H_EMPTY_COVERAGE as it's new and empty
-            f"Updated cache for page_hash: {_H2_COMMIT[:8]}",
-        ],
-    ),
+    cache_file_path="dummy_cache.json",
     ids=[
-        "add_new_and_update_existing_hash",
-        "pending_has_empty_list_for_new_hash",
-        "pending_empty_list_for_existing_hash_then_item",
-        "empty_pending_updates",
-        "pending_updates_one_item_no_existing",
-        "commit_one_new_hash_with_empty_list",
-        "empty_existing_hash_then_valid_item",  # New test ID
-        "empty_new_hash_then_valid_item",  # New test ID
+        "update_and_add_new_page",
+        "add_empty_page_no_longer_adds_to_cache",
+        "no_change_in_pending",
+        "empty_pending_for_new_hash_no_add",
     ],
 )
 def test_commit_pending_cache_updates(
     mocker: Callable,
-    tmp_path: Path,
     initial_translation_cache: dict[str, list[dict[str, str]]],
     pending_updates: dict[str, list[dict[str, str]]],
+    cache_file_path: str,
     expected_final_cache_content: dict[str, list[dict[str, str]]],
     expected_echo_substrings: list[str],
 ) -> None:
-    """Test committing pending cache updates."""
-    mock_echo = mocker.patch("pptrans.cache.click.echo")
+    """Test committing pending cache updates to the main cache."""
     mock_save_cache = mocker.patch("pptrans.cache.save_cache")
-    cache_file_path = str(tmp_path / "test_cache.json")
+    mock_echo = mocker.patch("pptrans.cache.click.echo")
 
-    current_translation_cache = {
-        k: list(v) for k, v in initial_translation_cache.items()
+    # Create mutable copies
+    translation_cache = {
+        k: [item.copy() for item in v] for k, v in initial_translation_cache.items()
+    }
+    pending_page_cache_updates = {
+        k: [item.copy() for item in v] for k, v in pending_updates.items()
     }
 
     commit_pending_cache_updates(
-        current_translation_cache, pending_updates, cache_file_path
+        translation_cache, pending_page_cache_updates, cache_file_path
     )
 
-    assert current_translation_cache == expected_final_cache_content
-    mock_save_cache.assert_called_once_with(
-        expected_final_cache_content, cache_file_path
-    )
+    assert translation_cache == expected_final_cache_content
+    assert not pending_page_cache_updates  # Pending updates should be cleared
 
+    # Check save_cache calls
+    if expected_final_cache_content:
+        mock_save_cache.assert_called_once_with(
+            expected_final_cache_content, cache_file_path
+        )
+    else:
+        mock_save_cache.assert_not_called()
+
+    # Check echo calls
     all_echo_output = " ".join(
         call_args[0][0] for call_args in mock_echo.call_args_list
     )
