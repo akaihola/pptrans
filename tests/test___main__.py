@@ -200,8 +200,8 @@ def test_handle_slide_selection(
                     text_frame=create_mock_text_frame(
                         paragraphs=[create_mock_paragraph(runs=[])]
                     ),
-                    left=100,
-                    top=200,
+                    left=100000,
+                    top=200000,
                 )
             ]
         ),
@@ -223,8 +223,8 @@ def test_handle_slide_selection(
                             )
                         ]
                     ),
-                    left=100,
-                    top=200,
+                    left=100000,
+                    top=200000,
                 )
             ]
         ),
@@ -270,8 +270,8 @@ def test_handle_slide_selection(
                             )
                         ]
                     ),
-                    left=300,
-                    top=400,
+                    left=300000,
+                    top=400000,
                 )
             ]
         ),
@@ -297,8 +297,8 @@ def test_handle_slide_selection(
                             create_mock_paragraph([create_mock_run("TextShape")])
                         ]
                     ),
-                    left=500,
-                    top=600,
+                    left=500000,
+                    top=600000,
                 ),
                 create_mock_shape(
                     has_table=True,
@@ -319,8 +319,8 @@ def test_handle_slide_selection(
                             )
                         ]
                     ),
-                    left=700,
-                    top=800,
+                    left=700000,
+                    top=800000,
                 ),
             ]
         ),
@@ -371,8 +371,8 @@ def test_handle_slide_selection(
                             )
                         ]
                     ),
-                    left=900,
-                    top=1000,
+                    left=900000,
+                    top=1000000,
                 )
             ]
         ),
@@ -400,8 +400,8 @@ def test_handle_slide_selection(
                             )
                         ]
                     ),
-                    left=1100,
-                    top=1200,
+                    left=1100000,
+                    top=1200000,
                 )
             ]
         ),
@@ -1105,7 +1105,8 @@ def test_process_translation_mode_with_llm_call(
     mock_build_prompt.assert_called_once_with(texts_for_llm)
     mock_get_model.assert_called_once()
     mock_llm.prompt.assert_called_once_with(
-        "LLM Prompt", fragments=["pg1,el0,run0,x=100,y=200:Text For LLM" + EOL_MARKER]
+        "LLM Prompt",
+        fragments=["pg1,el0,run0,x=100,y=200:Text For LLM" + EOL_MARKER],
     )
 
     # Check pending updates were correctly initialized
