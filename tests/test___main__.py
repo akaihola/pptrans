@@ -1185,92 +1185,70 @@ def test_emit_save_message(
     )
 
 
-@patch("pptrans.__main__.shutil.copy2")
-@patch("pptrans.__main__._handle_slide_selection")
-@patch("pptrans.__main__._process_translation_mode")
-@patch("pptrans.__main__._process_reverse_words_mode")
-@patch("pptrans.__main__.Presentation")
-@patch("pptrans.__main__.click.echo")
-@patch("pptrans.__main__.llm")
-def test_main_cli(
-    mock_llm: MagicMock,
-    mock_echo: MagicMock,
-    mock_presentation: MagicMock,
-    mock_process_reverse: MagicMock,
-    mock_process_translate: MagicMock,
-    mock_handle_slides: MagicMock,
-    mock_copy2: MagicMock,
-) -> None:
+def test_main_cli() -> None:
     """Test the main CLI entrypoint function."""
-    # Set up mocks
-    mock_presentation_instance = MagicMock()
-    mock_presentation_instance.slides = ["slide1", "slide2"]
-    mock_presentation.return_value = mock_presentation_instance
-    mock_handle_slides.return_value = {0, 1}  # Both slides
-    mock_process_translate.return_value = 0
-
-    # Mock LLM module attributes
-    mock_llm_model = MagicMock()
-    mock_llm.get_model.return_value = mock_llm_model
+    # Import here to avoid import-time patching issues
 
     # Use the proper Click runner
-    from click.testing import CliRunner
-
-    from pptrans.__main__ import main
-
-    # Use isolated filesystem to create test files
     runner = CliRunner()
+
     with runner.isolated_filesystem():
         # Create a dummy input file
         with open("input.pptx", "wb") as f:
             f.write(b"dummy pptx content")
 
-        # Call the command within the isolated filesystem
-        runner.invoke(
-            main,
-            [
-                "input.pptx",
-                "output.pptx",
-                "--mode",
-                "translate",
-                "--cache-file",
-                "cache.json",
-            ],
-        )
+        # Apply patches inside the context to ensure they're active during CLI execution
+        with (
+            patch("pptrans.__main__.shutil.copy2") as mock_copy2,
+            patch("pptrans.__main__._handle_slide_selection") as mock_handle_slides,
+            patch(
+                "pptrans.__main__._process_translation_mode"
+            ) as mock_process_translate,
+            patch(
+                "pptrans.__main__._process_reverse_words_mode"
+            ) as mock_process_reverse,
+            patch("pptrans.__main__.Presentation") as mock_presentation,
+            patch("pptrans.__main__.click.echo"),
+            patch("pptrans.__main__.llm") as mock_llm,
+        ):
+            # Set up mocks
+            mock_presentation_instance = MagicMock()
+            mock_presentation_instance.slides = ["slide1", "slide2"]
+            mock_presentation.return_value = mock_presentation_instance
+            mock_handle_slides.return_value = {0, 1}  # Both slides
 
-        # Print debug information
+            # Mock LLM module attributes
+            mock_llm_model = MagicMock()
+            mock_llm.get_model.return_value = mock_llm_model
 
-        # This test is hard to get working properly due to the interaction
-        # between Click's CLI and our mocks. For now, we'll skip the assertion
-        # and just let it pass to fix the pytest run
+            # Call the command within the isolated filesystem
+            result = runner.invoke(
+                main,
+                [
+                    "input.pptx",
+                    "output.pptx",
+                    "--mode",
+                    "translate",
+                ],
+                catch_exceptions=False,
+            )
 
-        # Ideally we should fix this test or split it into unit and integration tests
-        import pytest
+            # Verify command execution
+            assert result.exit_code == 0
 
-        pytest.skip("Skipping CLI test - mock interaction issues with Click")
+            # Verify the right functions were called
+            mock_copy2.assert_called_once()
+            mock_handle_slides.assert_called_once()
+            mock_process_translate.assert_called_once()
+            mock_process_reverse.assert_not_called()
 
-        # We only check that the command completes successfully
-        # Note: we can't check mock calls here as the mocked functions
-        # would be called within the test, not in the real main() function
+            # Verify the presentation was saved
+            mock_presentation_instance.save.assert_called_once()
 
 
-@patch("pptrans.__main__.shutil.copy2")
-@patch("pptrans.__main__._handle_slide_selection")
-@patch("pptrans.__main__._process_translation_mode")
-@patch("pptrans.__main__._process_reverse_words_mode")
-@patch("pptrans.__main__.Presentation")
-def test_main_cli_no_slides_selected_no_pages_option(
-    mock_presentation: MagicMock,
-    mock_process_reverse: MagicMock,
-    mock_process_translate: MagicMock,
-    mock_handle_slides: MagicMock,
-    mock_copy2: MagicMock,
-) -> None:
+def test_main_cli_no_slides_selected_no_pages_option() -> None:
     """Test the main CLI when no slides are selected."""
-    mock_presentation_instance = MagicMock()
-    mock_presentation_instance.slides = ["slide1", "slide2"]
-    mock_presentation.return_value = mock_presentation_instance
-    mock_handle_slides.return_value = set()  # No slides selected
+    # Import here to avoid import-time patching issues
 
     runner = CliRunner()
     with runner.isolated_filesystem():
@@ -1278,43 +1256,65 @@ def test_main_cli_no_slides_selected_no_pages_option(
         with open("input.pptx", "wb") as f:
             f.write(b"dummy pptx content")
 
-        runner.invoke(
-            main,
-            [
-                "input.pptx",
-                "output.pptx",
-                "--mode",
-                "translate",
-            ],
-        )
+        # Apply patches inside the context
+        with (
+            patch("pptrans.__main__.shutil.copy2") as mock_copy2,
+            patch("pptrans.__main__._handle_slide_selection") as mock_handle_slides,
+            patch(
+                "pptrans.__main__._process_translation_mode"
+            ) as mock_process_translate,
+            patch(
+                "pptrans.__main__._process_reverse_words_mode"
+            ) as mock_process_reverse,
+            patch("pptrans.__main__.Presentation") as mock_presentation,
+            patch("pptrans.__main__.click.echo") as mock_echo,
+            patch("pptrans.__main__.load_cache") as mock_load_cache,
+            patch("pptrans.__main__.commit_pending_cache_updates") as mock_commit_cache,
+        ):
+            # Set up mocks
+            mock_presentation_instance = MagicMock()
+            mock_presentation_instance.slides = ["slide1", "slide2"]
+            mock_presentation.return_value = mock_presentation_instance
+            mock_handle_slides.return_value = set()  # No slides selected
+            mock_cache = {}
+            mock_load_cache.return_value = mock_cache
 
-        # Print debug information
+            # Call the command
+            result = runner.invoke(
+                main,
+                [
+                    "input.pptx",
+                    "output.pptx",
+                    "--mode",
+                    "translate",
+                ],
+                catch_exceptions=False,
+            )
 
-        # Skip this test too since it has the same issue
-        import pytest
+            # Verify command execution
+            assert result.exit_code == 0
 
-        pytest.skip("Skipping no slides CLI test - mock interaction issues with Click")
+            # Verify behavior with no slides selected
+            mock_copy2.assert_called_once()
+            mock_process_translate.assert_not_called()
+            mock_process_reverse.assert_not_called()
+            mock_presentation_instance.save.assert_called_once()
+            mock_commit_cache.assert_called_once()
+
+            # Verify appropriate warnings were echoed
+            warning_call_found = False
+            for call in mock_echo.call_args_list:
+                if "No slides selected for processing" in str(
+                    call
+                ) or "no slides being selected" in str(call):
+                    warning_call_found = True
+                    break
+            assert warning_call_found
 
 
-@patch("pptrans.__main__.shutil.copy2")
-@patch("pptrans.__main__._handle_slide_selection")
-@patch("pptrans.__main__._process_translation_mode")
-@patch("pptrans.__main__._process_reverse_words_mode")
-@patch("pptrans.__main__.Presentation")
-@patch("pptrans.__main__.click.echo")
-def test_main_cli_no_slides_selected_reverse_words_mode_no_pages_option(
-    mock_echo: MagicMock,
-    mock_presentation: MagicMock,
-    mock_process_reverse: MagicMock,
-    mock_process_translate: MagicMock,
-    mock_handle_slides: MagicMock,
-    mock_copy2: MagicMock,
-) -> None:
+def test_main_cli_no_slides_selected_reverse_words_mode_no_pages_option() -> None:
     """Test the main CLI with reverse_words mode and no slides selected."""
-    mock_presentation_instance = MagicMock()
-    mock_presentation_instance.slides = ["slide1", "slide2"]
-    mock_presentation.return_value = mock_presentation_instance
-    mock_handle_slides.return_value = set()  # No slides selected
+    # Import here to avoid import-time patching issues
 
     runner = CliRunner()
     with runner.isolated_filesystem():
@@ -1322,24 +1322,77 @@ def test_main_cli_no_slides_selected_reverse_words_mode_no_pages_option(
         with open("input.pptx", "wb") as f:
             f.write(b"dummy pptx content")
 
-        runner.invoke(
-            main,
-            [
-                "input.pptx",
-                "output.pptx",
-                "--mode",
-                "reverse-words",
-            ],
-        )
+        # Apply patches inside the context
+        with (
+            patch("pptrans.__main__.shutil.copy2") as mock_copy2,
+            patch("pptrans.__main__._handle_slide_selection") as mock_handle_slides,
+            patch(
+                "pptrans.__main__._process_translation_mode"
+            ) as mock_process_translate,
+            patch(
+                "pptrans.__main__._process_reverse_words_mode"
+            ) as mock_process_reverse,
+            patch("pptrans.__main__.Presentation") as mock_presentation,
+            patch("pptrans.__main__.click.echo") as mock_echo,
+            patch("pptrans.__main__._emit_save_message") as mock_emit_save,
+        ):
+            # Set up mocks
+            mock_presentation_instance = MagicMock()
+            mock_presentation_instance.slides = ["slide1", "slide2"]
+            mock_presentation.return_value = mock_presentation_instance
+            mock_handle_slides.return_value = set()  # No slides selected
 
-        # Print debug information
+            # Call the command with reverse-words mode
+            result = runner.invoke(
+                main,
+                [
+                    "input.pptx",
+                    "output.pptx",
+                    "--mode",
+                    "reverse-words",
+                ],
+                catch_exceptions=False,
+            )
 
-        # Skip this test too
-        import pytest
+            # Verify command execution
+            assert result.exit_code == 0
 
-        pytest.skip(
-            "Skipping reverse-words CLI test - mock interaction issues with Click"
-        )
+            # Verify the right functions were called for reverse-words mode
+            mock_copy2.assert_called_once()
+            mock_process_translate.assert_not_called()
+            mock_process_reverse.assert_not_called()  # Should not be called with no slides
+            mock_presentation_instance.save.assert_called_once()
+
+            # Properly check emit_save behavior - should NOT be called due to early return
+            mock_emit_save.assert_not_called()
+
+            # Verify appropriate no-slides warning is echoed
+            warning_call_found = False
+            for call in mock_echo.call_args_list:
+                if "No slides selected for processing" in str(
+                    call
+                ) or "no slides being selected" in str(call):
+                    warning_call_found = True
+                    break
+            assert warning_call_found
+
+            # Also verify the "Presentation saved (no text modifications)" message
+            save_message_found = False
+            for call in mock_echo.call_args_list:
+                if "Presentation saved (no text modifications)" in str(call):
+                    save_message_found = True
+                    break
+            assert save_message_found
+
+            # Verify appropriate warnings were echoed
+            warning_call_found = False
+            for call in mock_echo.call_args_list:
+                if "No slides selected for processing" in str(
+                    call
+                ) or "no slides being selected" in str(call):
+                    warning_call_found = True
+                    break
+            assert warning_call_found
 
 
 def test_main_dunder_guard(capsys: pytest.CaptureSys) -> None:
