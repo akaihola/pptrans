@@ -237,7 +237,7 @@ def _process_translation_mode(
         click.echo(formatted_text_for_llm)
         click.echo("--- END OF PROMPT ---")
 
-        model_instance = llm.get_model()
+        model_instance = llm.get_model("gemini-2.5-flash-preview-04-17")
         response = model_instance.prompt(
             prompt_text, fragments=[formatted_text_for_llm]
         )
