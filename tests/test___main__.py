@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import importlib
+import sys
 from pathlib import Path  # Import Path for runtime use
 from typing import TYPE_CHECKING, Any
+from unittest import mock
 from unittest.mock import MagicMock, patch
 
+import click
 import pytest  # Import pytest for the marker
 from click.testing import CliRunner
 from pptx.util import Emu  # Import Emu
@@ -705,7 +709,7 @@ def test_process_translation_mode_all_cached(
     mock_echo.assert_any_call("Processing 1 selected slide(s) for translation...")
     mock_extract_run.assert_called_once_with(mock_slide)
     mock_gen_hash.assert_called_once_with(["Cached Text"])
-    # Allow prepare_slide_for_translation to be called - that's the actual implementation
+    # Allow to call prepare_slide_for_translation - that's the actual implementation
     mock_prep_slide.assert_called_once()
     mock_build_prompt.assert_not_called()
     mock_get_model.assert_not_called()
@@ -1034,7 +1038,8 @@ def test_process_translation_mode_with_llm_call(
         }
     ]
     mock_gen_hash.return_value = "hash1"
-    # prepare_slide_for_translation returns (texts_for_llm, processed_runs, requires_llm)
+    # prepare_slide_for_translation returns:
+    # (texts_for_llm, processed_runs, requires_llm)
     texts_for_llm = [
         {
             "id": "pg1,el0,run0",
@@ -1070,7 +1075,7 @@ def test_process_translation_mode_with_llm_call(
     mock_llm.prompt.return_value = mock_llm_response
     mock_get_model.return_value = mock_llm
 
-    # Add a side effect to mock_update_llm_resp that updates the pending_page_cache_updates
+    # Add mock_update_llm_resp side effect that updates the pending_page_cache_updates
     def update_llm_side_effect(
         llm_lines,
         texts_for_llm_list,
@@ -1121,7 +1126,7 @@ def test_process_translation_mode_with_llm_call(
 @patch("pptrans.__main__.click.echo")
 def test_process_reverse_words_mode_no_slides_to_process(mock_echo: MagicMock) -> None:
     """Test _process_reverse_words_mode with no slides to process."""
-    _process_reverse_words_mode([], [], EOL_MARKER)
+    _process_reverse_words_mode([], EOL_MARKER)
     mock_echo.assert_any_call(
         "No text found to process on selected slides for mode 'reverse-words'."
     )
@@ -1135,7 +1140,7 @@ def test_process_reverse_words_mode_no_text(
     """Test _process_reverse_words_mode with a slide but no text."""
     mock_extract_run.return_value = []  # No text found
     mock_slide = MagicMock()
-    _process_reverse_words_mode([mock_slide], [0], EOL_MARKER)
+    _process_reverse_words_mode([mock_slide], EOL_MARKER)
     mock_echo.assert_any_call(
         "Extracting text from 1 slides for mode 'reverse-words'..."
     )
@@ -1157,7 +1162,7 @@ def test_process_reverse_words_mode_with_text(
         {"original_text": "Another text", "run_object": mock_run2},
     ]
     mock_slide = MagicMock()
-    _process_reverse_words_mode([mock_slide], [0], EOL_MARKER)
+    _process_reverse_words_mode([mock_slide], EOL_MARKER)
     assert mock_run1.text == "olleH dlrow"
     assert mock_run2.text == "rehtonA txet"
     mock_echo.assert_any_call(
@@ -1202,8 +1207,7 @@ def test_main_cli() -> None:
 
     with runner.isolated_filesystem():
         # Create a dummy input file
-        with open("input.pptx", "wb") as f:
-            f.write(b"dummy pptx content")
+        Path("input.pptx").write_bytes(b"dummy pptx content")
 
         # Apply patches inside the context to ensure they're active during CLI execution
         with (
@@ -1267,8 +1271,7 @@ def test_main_cli_no_slides_selected_no_pages_option() -> None:
     runner = CliRunner()
     with runner.isolated_filesystem():
         # Create a dummy input file
-        with open("input.pptx", "wb") as f:
-            f.write(b"dummy pptx content")
+        Path("input.pptx").write_bytes(b"dummy pptx content")
 
         # Apply patches inside the context
         with (
@@ -1334,8 +1337,7 @@ def test_main_cli_no_slides_selected_reverse_words_mode_no_pages_option() -> Non
     runner = CliRunner()
     with runner.isolated_filesystem():
         # Create a dummy input file
-        with open("input.pptx", "wb") as f:
-            f.write(b"dummy pptx content")
+        Path("input.pptx").write_bytes(b"dummy pptx content")
 
         # Apply patches inside the context
         with (
@@ -1378,10 +1380,10 @@ def test_main_cli_no_slides_selected_reverse_words_mode_no_pages_option() -> Non
             # Verify the right functions were called for reverse-words mode
             mock_copy2.assert_called_once()
             mock_process_translate.assert_not_called()
-            mock_process_reverse.assert_not_called()  # Should not be called with no slides
+            mock_process_reverse.assert_not_called()  # Not to be called with no slides
             mock_presentation_instance.save.assert_called_once()
 
-            # Properly check emit_save behavior - should NOT be called due to early return
+            # Properly check emit_save behavior. Shouldn't be called due to early return
             mock_emit_save.assert_not_called()
 
             # Verify appropriate no-slides warning is echoed
@@ -1413,7 +1415,7 @@ def test_main_cli_no_slides_selected_reverse_words_mode_no_pages_option() -> Non
             assert warning_call_found
 
 
-def test_main_dunder_guard(capsys: pytest.CaptureSys) -> None:
+def test_main_dunder_guard(capsys: pytest.CaptureFixture[str]) -> None:
     """Test the ``if __name__ == '__main__':`` block.
 
     The code in ``if __name__ == '__main__':`` is not covered by the test suite.
@@ -1421,12 +1423,6 @@ def test_main_dunder_guard(capsys: pytest.CaptureSys) -> None:
     """
     # Instead of using runpy.run_module which requires a proper module spec,
     # import the module and simulate the __main__ guard directly
-    import importlib
-    import sys
-    from unittest import mock
-
-    import click
-
     main_module = importlib.import_module("pptrans.__main__")
 
     # Save the original value
@@ -1438,14 +1434,14 @@ def test_main_dunder_guard(capsys: pytest.CaptureSys) -> None:
             # Simulate as if running as __main__
             main_module.__name__ = "__main__"
             # Execute the main function directly
-            with patch.object(main_module, "__name__", "__main__"):
-                with mock.patch.object(click, "echo"):  # Suppress output
-                    with mock.patch.object(
-                        sys, "exit"
-                    ) as exit_mock:  # Prevent actual exit
-                        main_module.main()
-                        # Check that sys.exit was called, which is expected in CLI tools
-                        exit_mock.assert_called_once()
+            with (
+                patch.object(main_module, "__name__", "__main__"),
+                mock.patch.object(click, "echo"),  # Suppress output
+                mock.patch.object(sys, "exit") as exit_mock,  # Prevent actual exit
+            ):
+                main_module.main()
+                # Check that sys.exit was called, which is expected in CLI tools
+                exit_mock.assert_called_once()
         finally:
             # Restore original value
             main_module.__name__ = original_name

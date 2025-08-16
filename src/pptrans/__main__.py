@@ -1,5 +1,11 @@
 """Translate PowerPoint presentations."""
 
+# pyright: reportAttributeAccessIssue=none
+# pyright: reportUnknownMemberType=none
+# pyright: reportUnnecessaryComparison=none
+# pyright: reportUnknownVariableType=none
+# pyright: reportAny=none
+
 from __future__ import annotations
 
 import shutil
@@ -20,6 +26,8 @@ from pptrans.cache import (
 from pptrans.page_range import parse_page_range
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from pptx.slide import Slide as PptxSlide  # pragma: no cover
 
 
@@ -106,8 +114,28 @@ def _extract_run_info_from_slide(slide_obj: PptxSlide) -> list[dict[str, Any]]:
     return run_info_list
 
 
+EXAMPLES = {
+    "Finnish": {
+        "THIS_IS_A_LONG": "Tämä on pitkä",
+        "SENTENCE_THAT_HAS_BEEN": "lause, joka on",
+        "SPLIT": "jaettu",
+        "ANOTHER_SENTENCE": "Toinen lause",
+        "HERE_IS_A_COLON": "Tässä on kaksoispiste",
+    },
+    "English": {
+        "THIS_IS_A_LONG": "This is a long",
+        "SENTENCE_THAT_HAS_BEEN": "sentence that has been",
+        "SPLIT": "split",
+        "ANOTHER_SENTENCE": "Another sentence",
+        "HERE_IS_A_COLON": "Here's a colon",
+    },
+}
+
+
 # Helper function to build LLM prompt
-def _build_llm_prompt_and_data(texts_for_llm: list[dict[str, Any]]) -> tuple[str, str]:
+def _build_llm_prompt_and_data(
+    texts_for_llm: list[dict[str, Any]], from_language: str, to_language: str
+) -> tuple[str, str]:
     """Construct the LLM prompt and the formatted data string."""
     formatted_text_for_llm = "\n".join(
         [
@@ -115,11 +143,13 @@ def _build_llm_prompt_and_data(texts_for_llm: list[dict[str, Any]]) -> tuple[str
             for item in texts_for_llm
         ]
     )
+    src = EXAMPLES[from_language]
+    tgt = EXAMPLES[to_language]
     # EOL_MARKER is a global constant in this module
     prompt_text = (
-        "You are an expert Finnish to English translator. "
-        "Translate the following text segments accurately from Finnish to "
-        "English. "
+        f"You are an expert {from_language} to {to_language} translator. "
+        f"Translate the following text segments accurately from {from_language} to "
+        f"{to_language}. "
         "Each segment is prefixed with a unique ID in the format "
         "pg<PageNum>,el<ElementIdx>,run<RunIdxInElement>. "
         "The ID is followed by the x and y coordinates of the text's parent "
@@ -141,18 +171,18 @@ def _build_llm_prompt_and_data(texts_for_llm: list[dict[str, Any]]) -> tuple[str
         "IT MUST be present at the end of your translated segment, including "
         "any whitespace before it.\n"
         "For example, if you receive:\n"
-        f"pg1,el0,run0,x=100,y=200:Tämä on pitkä {EOL_MARKER}\n"
-        f"pg1,el0,run1,x=100,y=200:lause, joka on {EOL_MARKER}\n"
-        f"pg1,el0,run2,x=100,y=200:jaettu.{EOL_MARKER}\n"
-        f"pg1,el1,run0,x=50,y=300:    Toinen lause.   {EOL_MARKER}\n"
-        f"pg2,el0,run0,x=120,y=220:Tässä on kaksoispiste{EOL_MARKER}\n"
+        f"pg1,el0,run0,x=100,y=200:{src['THIS_IS_A_LONG']} {EOL_MARKER}\n"
+        f"pg1,el0,run1,x=100,y=200:{src['SENTENCE_THAT_HAS_BEEN']} {EOL_MARKER}\n"
+        f"pg1,el0,run2,x=100,y=200:{src['SPLIT']}.{EOL_MARKER}\n"
+        f"pg1,el1,run0,x=50,y=300:    {src['ANOTHER_SENTENCE']}   {EOL_MARKER}\n"
+        f"pg2,el0,run0,x=120,y=220:{src['HERE_IS_A_COLON']}{EOL_MARKER}\n"
         f"pg2,el0,run1,x=120,y=220::{EOL_MARKER}\n"
         "You MUST return:\n"
-        f"pg1,el0,run0:This is a long {EOL_MARKER}\n"
-        f"pg1,el0,run1:sentence that has been {EOL_MARKER}\n"
-        f"pg1,el0,run2:split.{EOL_MARKER}\n"
-        f"pg1,el1,run0:    Another sentence.   {EOL_MARKER}\n"
-        f"pg2,el0,run0:Here's a colon{EOL_MARKER}\n"
+        f"pg1,el0,run0:{tgt['THIS_IS_A_LONG']} {EOL_MARKER}\n"
+        f"pg1,el0,run1:{tgt['SENTENCE_THAT_HAS_BEEN']} {EOL_MARKER}\n"
+        f"pg1,el0,run2:{tgt['SPLIT']}.{EOL_MARKER}\n"
+        f"pg1,el1,run0:    {tgt['ANOTHER_SENTENCE']}   {EOL_MARKER}\n"
+        f"pg2,el0,run0:{tgt['HERE_IS_A_COLON']}{EOL_MARKER}\n"
         f"pg2,el0,run1::{EOL_MARKER}\n"
         "Do not add any extra explanations, apologies, or "
         "introductory/concluding remarks. "
@@ -194,11 +224,13 @@ def _apply_translations_to_runs(
 
 # Mode-specific processing function for "translate"
 def _process_translation_mode(
-    slides_to_process: list[PptxSlide],
+    slides_to_process: Sequence[PptxSlide],
     original_page_indices: list[int],
     cache_file_path: str,
     eol_marker: str,
     model: str,
+    from_language: str,
+    to_language: str,
 ) -> None:
     """Handle the entire translation process for selected slides."""
     translation_cache = load_cache(cache_file_path)
@@ -266,7 +298,9 @@ def _process_translation_mode(
             "translation."
         )
         prompt_text, formatted_text_for_llm = _build_llm_prompt_and_data(
-            global_texts_for_llm_prompt
+            global_texts_for_llm_prompt,
+            from_language,
+            to_language,
         )
 
         click.echo("--- PROMPT TO LLM ---")
@@ -305,7 +339,6 @@ def _process_translation_mode(
 # Mode-specific processing function for "reverse-words"
 def _process_reverse_words_mode(
     slides_to_process: list[PptxSlide],
-    original_page_indices: list[int],
     eol_marker: str,
 ) -> None:
     """Handle the reverse words process for selected slides."""
@@ -316,10 +349,7 @@ def _process_reverse_words_mode(
             f"Extracting text from {len(slides_to_process)} slides for "
             "mode 'reverse-words'..."
         )
-        for slide_idx, slide_to_extract in enumerate(slides_to_process):
-            original_page_0_indexed = original_page_indices[slide_idx]
-            original_page_0_indexed + 1
-
+        for slide_to_extract in slides_to_process:
             run_info_on_slide = _extract_run_info_from_slide(slide_to_extract)
 
             for run_detail in run_info_on_slide:
@@ -376,14 +406,34 @@ def _process_reverse_words_mode(
     "-m",
     "--model",
     type=str,
-    default="gemini-2.5-flash-preview-04-17",
+    default="gemini-2.5-flash",
     show_default=True,
     help="LLM model to use for translation",
+)
+@click.option(
+    "-f",
+    "--from-language",
+    type=str,
+    default="English",
+    help="Source language name in English",
+)
+@click.option(
+    "-t",
+    "--to-language",
+    type=str,
+    default="Finnish",
+    help="Target language name in English",
 )
 @click.argument("input_path", type=click.Path(exists=True, dir_okay=False))
 @click.argument("output_path", type=click.Path(dir_okay=False))
 def main(
-    input_path: str, output_path: str, mode: str, pages: str | None, model: str
+    input_path: str,
+    output_path: str,
+    mode: str,
+    pages: str | None,
+    model: str,
+    from_language: str,
+    to_language: str,
 ) -> None:
     """Process a PowerPoint presentation.
 
@@ -450,13 +500,11 @@ def main(
             cache_file_path,
             EOL_MARKER,
             model,
+            from_language,
+            to_language,
         )
     elif mode == "reverse-words":
-        _process_reverse_words_mode(
-            slides_to_process_objects,
-            original_page_indices_for_processing,
-            EOL_MARKER,
-        )
+        _process_reverse_words_mode(slides_to_process_objects, EOL_MARKER)
     else:  # pragma: no cover
         # This case should be prevented by click.Choice on the --mode option.
         # If execution reaches here, it's an unexpected state.

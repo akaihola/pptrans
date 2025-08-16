@@ -51,8 +51,11 @@ def parse_page_range(range_str: str, total_slides: int) -> set[int]:
             # g[3] is M
             start_1_idx = 1
             end_1_idx = int(g[3])
-        # An 'else' case is not strictly needed due to the 'if not match' check.
-        # If regex logic were flawed, it might be hit, implying an unhandled pattern.
+        else:
+            # This case should not happen due to the regex structure.
+            # If it does, it indicates an unexpected format.
+            msg = f"Unexpected match failure for part: '{part}'"
+            raise click.BadParameter(msg)
 
         # Determine the actual loop bounds, clamped to valid 1-indexed pages.
         # Pages < 1 are effectively treated as 1 for the start.

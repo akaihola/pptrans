@@ -1,14 +1,16 @@
 """Cache management for translations."""
 
+# pyright: reportAny=none
+
 import hashlib
 import json
 from pathlib import Path
-from typing import Any  # Added for type hints
+from typing import Any, cast  # Added for type hints
 
 import click
 
 
-def load_cache(cache_file_path: str) -> dict:
+def load_cache(cache_file_path: str) -> dict[str, list[dict[str, str]]]:
     """Load the translation cache from a JSON file."""
     cache_file = Path(cache_file_path)
     if cache_file.exists():
@@ -18,7 +20,7 @@ def load_cache(cache_file_path: str) -> dict:
                 click.echo(
                     f"Successfully loaded translation cache from: {cache_file_path}"
                 )
-                return json.load(f)
+                return cast("dict[str, list[dict[str, str]]]", json.load(f))
         except (OSError, json.JSONDecodeError) as e:
             click.echo(
                 f"Warning: Could not load cache file {cache_file_path}. Error: {e}. "
@@ -32,7 +34,9 @@ def load_cache(cache_file_path: str) -> dict:
     return {}
 
 
-def save_cache(cache_data: dict, cache_file_path: str) -> None:
+def save_cache(
+    cache_data: dict[str, list[dict[str, str]]], cache_file_path: str
+) -> None:
     """Save the translation cache to a JSON file."""
     try:
         with Path(cache_file_path).open("w", encoding="utf-8") as f:
@@ -177,7 +181,7 @@ def prepare_slide_for_translation(
     )
 
 
-def update_data_from_llm_response(
+def update_data_from_llm_response(  # noqa: PLR0912
     llm_response_lines: list[str],
     global_texts_for_llm_prompt_ref: list[dict[str, Any]],
     all_processed_run_details_ref: list[dict[str, Any]],
