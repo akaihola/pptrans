@@ -1,0 +1,66 @@
+name: Deploy to GitHub Pages
+
+on:
+  workflow_run:
+    workflows: ["Build Python Wheel"]
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  actions: read
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Pages
+        uses: actions/configure-pages@v5
+
+      - name: Download wheel artifact
+        id: download-artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: python-wheel
+          run-id: ${{ github.event.workflow_run.id }}
+          path: ./temp-wheel-artifact
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare deployment artifact structure
+        run: |
+          mkdir -p _site/dist
+          echo "Moving wheel(s)..."
+          mv ./temp-wheel-artifact/* _site/dist/
+          echo "Checking for webapp directory..."
+          if [ -d "webapp" ]; then
+            echo "Copying webapp contents..."
+            # Use rsync for potentially better handling of files/directories
+            rsync -av --exclude='.git*' webapp/ _site/
+          else
+            echo "webapp directory not found, skipping copy."
+          fi
+          echo "Final structure in _site:"
+          ls -R _site
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "_site"
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
