@@ -18,28 +18,9 @@
             await micropip.install(
                 `${document.location.protocol}dist/pptrans-0.1.0-py3-none-any.whl`
             );
-            await pyodide.runPythonAsync(`
-                import traceback
-                from pathlib import Path
-
-                from js import document, Uint8Array
-                from pyodide.ffi.wrappers import add_event_listener
-
-                import click
-                from pptrans.__main__ import main
-
-                async def handle_file_upload(event):
-                    file = event.target.files.item(0)
-                    file_bytes = await file.arrayBuffer()
-                    data = Uint8Array.new(file_bytes).to_bytes()
-                    Path("input.pptx").write_bytes(data)
-                    ctx = click.Context(main)
-                    ctx.forward(main, input_path="input.pptx", output_path="output.pptx")
-                    output = document.getElementById("output")
-                    output.innerHTML = f"<a href='output.pptx'>Download Translated Presentation</a>"
-
-                add_event_listener(document.getElementById("file-upload"), "change", handle_file_upload)
-            `);
+            const response = await fetch("index.py");
+            const pythonCode = await response.text();
+            await pyodide.runPythonAsync(pythonCode);
         }
         main();
     </script>

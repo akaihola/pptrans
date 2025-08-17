@@ -5,6 +5,8 @@
 # ]
 # ///
 
+"""Create a minimal sample PowerPoint presentation."""
+
 import marimo
 
 __generated_with = "0.14.17"
@@ -15,9 +17,9 @@ app = marimo.App(width="medium")
 def _():
     from pathlib import Path
 
-    import marimo as mo
     import pptx
     from pptx.util import Inches
+
     return Inches, Path, pptx
 
 

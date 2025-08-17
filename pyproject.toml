@@ -24,11 +24,16 @@ pptrans = "pptrans.__main__:main"
 
 [dependency-groups]
 dev = [
+    "marimo",
     "mypy",
     "pytest",
     "pytest-cov",
     "pytest-kwparametrize",
     "pytest-mock",
+
+    # for type checking browser-side libraries
+    # see https://github.com/pyodide/pyodide/discussions/3985
+    "pyodide-py",
 ]
 
 [project.urls]
@@ -41,14 +46,14 @@ profile = "black"
 src = [
     "src",
 ]
-revision = "master..."
+revision = "main..."
 isort = true
 
 [tool.graylint]
 src = [
     "src",
 ]
-revision = "master..."
+revision = "main..."
 lint = [
     "mypy",
     "pydocstyle",
@@ -75,6 +80,7 @@ unfixable = []
 "tests/*.py" = [
     "ANN001",  # Missing type annotation for function argument
     "ANN201",  # Missing return type annotation for public function
+    #"ANN202",  # Missing return type annotation for private function
     "ANN204",  # Missing return type annotation for special method `__init__`
     "ANN401",  # Dynamically typed expressions (typing.Any) are disallowed
     "ARG001",  # Unused argument
@@ -96,6 +102,18 @@ unfixable = []
     "PT019",
     "S101",  # Use of `assert` detected
 ]
+"src/js/*.py" = [
+    "D101",  # Missing docstring in public class
+    "D102",  # Missing
+    "INP001",  # File is part of an implicit namespace package. Add an `__init__.py`.
+    "N802",  # Function name should be lowercase
+    "N803",  # Argument name should be lowercase
+    "N815",  # Variable in class scope should not be mixedCase
+]
+"webapp/*.py" = [
+    "INP001",  # File is part of an implicit namespace package. Add an `__init__.py`.
+    "PYI021",  # Docstrings should not be included in stubs
+]
 
 [tool.pyright]
 reportImplicitStringConcatenation = "none"
@@ -114,3 +132,8 @@ reportUnknownVariableType = "none"
 reportUnknownMemberType = "none"
 reportUnusedParameter = "none"
 reportFunctionMemberAccess = "none"
+
+[[tool.pyright.executionEnvironments]]
+root = "src/js"
+reportUninitializedInstanceVariable = "none"
+reportUnusedParameter = "none"

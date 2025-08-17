@@ -426,7 +426,7 @@ def _process_reverse_words_mode(
 )
 @click.argument("input_path", type=click.Path(exists=True, dir_okay=False))
 @click.argument("output_path", type=click.Path(dir_okay=False))
-def main(
+def main(  # noqa: PLR0913 (too-many-arguments)
     input_path: str,
     output_path: str,
     mode: str,

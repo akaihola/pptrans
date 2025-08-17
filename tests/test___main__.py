@@ -523,7 +523,9 @@ def test_build_llm_prompt_and_data(
     expected_formatted_text: str,
     expected_prompt_contains: list[str],
 ) -> None:
-    prompt_text, formatted_text_for_llm = _build_llm_prompt_and_data(texts_for_llm)
+    prompt_text, formatted_text_for_llm = _build_llm_prompt_and_data(
+        texts_for_llm, "English", "Finnish"
+    )
 
     for expected_substring in expected_prompt_contains:
         assert expected_substring in prompt_text
@@ -624,7 +626,13 @@ def test_process_translation_mode_no_slides(
 ) -> None:
     mock_load_cache.return_value = {}
     _process_translation_mode(
-        [], [], "cache.json", EOL_MARKER, "gemini-2.5-flash-preview-04-17"
+        [],
+        [],
+        "cache.json",
+        EOL_MARKER,
+        "gemini-2.5-flash-preview-04-17",
+        "English",
+        "Finnish",
     )
     mock_echo.assert_any_call(
         "No text found to process on selected slides for mode 'translate'."
@@ -699,7 +707,13 @@ def test_process_translation_mode_all_cached(
 
     mock_slide = create_mock_slide(shapes=[])
     _process_translation_mode(
-        [mock_slide], [0], "cache.json", EOL_MARKER, "gemini-2.5-flash-preview-04-17"
+        [mock_slide],
+        [0],
+        "cache.json",
+        EOL_MARKER,
+        "gemini-2.5-flash-preview-04-17",
+        "English",
+        "Finnish",
     )
 
     # Print out all echo calls to debug
@@ -902,6 +916,8 @@ def test_process_translation_mode_slide_with_no_text_then_slide_with_text(
         cache_file_path="cache.json",
         eol_marker=EOL_MARKER,
         model="gemini-2.5-flash-preview-04-17",
+        from_language="English",
+        to_language="Finnish",
     )
 
     # Assertions for the first slide (empty)
@@ -1097,7 +1113,13 @@ def test_process_translation_mode_with_llm_call(
     # Action
     mock_slide = MagicMock()
     _process_translation_mode(
-        [mock_slide], [0], "cache.json", EOL_MARKER, "gemini-2.5-flash-preview-04-17"
+        [mock_slide],
+        [0],
+        "cache.json",
+        EOL_MARKER,
+        "gemini-2.5-flash-preview-04-17",
+        "English",
+        "Finnish",
     )
 
     # Assertions
