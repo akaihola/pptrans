@@ -524,7 +524,7 @@ def test_build_llm_prompt_and_data(
     expected_prompt_contains: list[str],
 ) -> None:
     prompt_text, formatted_text_for_llm = _build_llm_prompt_and_data(
-        texts_for_llm, "English", "Finnish"
+        texts_for_llm, "Finnish", "English"
     )
 
     for expected_substring in expected_prompt_contains:
@@ -712,8 +712,8 @@ def test_process_translation_mode_all_cached(
         "cache.json",
         EOL_MARKER,
         "gemini-2.5-flash-preview-04-17",
-        "English",
         "Finnish",
+        "English",
     )
 
     # Print out all echo calls to debug
@@ -916,8 +916,8 @@ def test_process_translation_mode_slide_with_no_text_then_slide_with_text(
         cache_file_path="cache.json",
         eol_marker=EOL_MARKER,
         model="gemini-2.5-flash-preview-04-17",
-        from_language="English",
-        to_language="Finnish",
+        from_language="Finnish",
+        to_language="English",
     )
 
     # Assertions for the first slide (empty)
@@ -940,7 +940,9 @@ def test_process_translation_mode_slide_with_no_text_then_slide_with_text(
         2,  # current_page_num_1_indexed (for slide 2)
     )
 
-    mock_build_prompt.assert_called_once_with(texts_for_llm_from_prep)
+    mock_build_prompt.assert_called_once_with(
+        texts_for_llm_from_prep, "Finnish", "English"
+    )
     # llm.get_model() in _process_translation_mode is called without arguments in the
     # actual code.
     # It relies on the llm module being pre-configured.
@@ -1118,8 +1120,8 @@ def test_process_translation_mode_with_llm_call(
         "cache.json",
         EOL_MARKER,
         "gemini-2.5-flash-preview-04-17",
-        "English",
         "Finnish",
+        "English",
     )
 
     # Assertions
@@ -1129,7 +1131,7 @@ def test_process_translation_mode_with_llm_call(
         mock_extract_run.return_value, "hash1", {}, EOL_MARKER, 1
     )
 
-    mock_build_prompt.assert_called_once_with(texts_for_llm)
+    mock_build_prompt.assert_called_once_with(texts_for_llm, "Finnish", "English")
     mock_get_model.assert_called_once()
     mock_llm.prompt.assert_called_once_with(
         "LLM Prompt",
