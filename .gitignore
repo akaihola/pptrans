@@ -1,0 +1,8 @@
+!**
+*.pyc
+*.pptx
+*.pdf
+.coverage
+translation_cache*.json
+/uv.lock
+!/tests/sample.en.pptx
